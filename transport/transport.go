@@ -17,33 +17,60 @@ const (
 	Socket
 )
 
+// Useful for socket dialling or listening based on client and server
+type TransportType int
+const (
+	Client = iota
+	Server
+)
+
 // Transport structure to handle reading from streams
 type Transport struct {
+	Type   TransportType       // client or server
 	Method TransportMethod     // type of stream
-	Scanner *bufio.Scanner     // stream scanner 
+	Scanner *bufio.Scanner     // reader (scanner)
+	conn   net.Conn            // connection if socket
+	Writer io.Writer            // writer
 	Closed bool
 }
 
-func (t *Transport) Init(method TransportMethod){
+func (t *Transport) Init(ttype TransportType, method TransportMethod){
 	t.Method = method
+	t.Type = ttype
 	var r io.Reader
+	
 	switch t.Method {
 	// Communicate with client through stdin
 	case Stdin:
 		r = os.Stdin
+		t.Writer = os.Stdout
+
 	// Communicate with client through tcp socket
 	// Default port at 5007
 	// TODO: take port from cmd arguments
 	case Socket:
-		ln, err := net.Listen("tcp",":5007")
-		if err != nil {
-			logging.Logger.Fatal(err)
-		}
-		conn, err := ln.Accept()
-		if err != nil {
-			logging.Logger.Fatal(err)
+		var conn net.Conn
+
+		switch t.Type {
+		case Server:
+			ln, err := net.Listen("tcp",":5007")
+			if err != nil {
+				logging.Logger.Fatal(err)
+			}
+			conn, err = ln.Accept()
+			if err != nil {
+				logging.Logger.Fatal(err)
+			}
+		case Client:
+			var err error
+			conn, err = net.Dial("tcp", "localhost:5007")
+			t.conn = conn
+			if err != nil {
+				logging.Logger.Fatal(err)
+			}
 		}
 		r = conn
+		t.Writer = conn
 	}
 
 	scanner := bufio.NewScanner(r)
@@ -55,6 +82,19 @@ func (t *Transport) Init(method TransportMethod){
 func (t *Transport) Read() ([]byte, error) {
 	t.Closed = !t.Scanner.Scan()
 	return t.Scanner.Bytes(), t.Scanner.Err()
+}
+
+// Writes JSON RPC message
+// TODO: Validate message as JSON RPC before sending ?
+func (t *Transport) Write(msg []byte) error {
+	_, err := t.Writer.Write(msg)
+	return err
+}
+
+func (t *Transport) Close() {
+	if t.Type == Client {
+		t.conn.Close()
+	}
 }
 
 // Split function for scanner to parse a JSON RPC message
