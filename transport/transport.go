@@ -1,8 +1,9 @@
-package transport 
+package transport
 
 import (
-	"bytes"
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"errors"
 	"faustlsp/logging"
 	"io"
@@ -122,3 +123,13 @@ func split(data []byte, _ bool) (advance int, token []byte, err error) {
 	return totalLength, data[:totalLength], nil
 }
 
+func GetMethod(message []byte) (method string, error error) {
+	var msg RPCMessage
+	_, content, found := bytes.Cut(message, []byte{'\r', '\n', '\r', '\n'})
+	if !found {
+		return "", nil
+	}
+	
+	err := json.Unmarshal(content, &msg)
+	return msg.Method, err
+}

@@ -43,6 +43,7 @@ func (s *Server) Loop(ctx context.Context, end chan<- error){
 
 	// LSP Server Main Loop
 	for s.Status != Shutdown && !s.Transport.Closed && err == nil{
+		var method string
 		// If parent cancels, make sure to stop
 		select {
 		case <-ctx.Done():
@@ -53,12 +54,20 @@ func (s *Server) Loop(ctx context.Context, end chan<- error){
 		// Read one JSON RPC Message
 		msg, err = s.Transport.Read()
 
-		// TODO: Parse JSON RPC Message here and get method
+		// Parse JSON RPC Message here and get method
+		method, err = transport.GetMethod(msg)
+		if len(method) == 0 {break}
+		if err != nil { break }
+
+		logging.Logger.Println("Got Method: "+method)
 		// TODO: Validate Message (error if the client shouldn't be sending that message)
+		err = s.ValidateMethod(method)
+		if err != nil {break}
+		
 		// TODO: Dispatch to Method Handler
 
 		// Log Current JSON RPC Message
-		logging.Logger.Println("Got "+string(msg))
+
 		
 		// Dirty way to handle server ending for now
 		// Goal is to handle LSP exit message and set s.Status to Exit and end
@@ -70,6 +79,18 @@ func (s *Server) Loop(ctx context.Context, end chan<- error){
 	if err == nil && s.Transport.Closed {err = errors.New("Stream Closed: Got EOF")}
 	s.Transport.Close()
 	end <- err
+}
+
+func (s *Server) ValidateMethod(method string) error{
+	switch method {
+	case "initialize":
+		if s.Status != Created && s.Status != Shutdown {
+			return errors.New("Server already initialized")
+		}
+	default:
+		return errors.New("Invalid Method: "+method)
+	}
+	return nil
 }
 
 // Might be pointless ?
