@@ -12,7 +12,7 @@ func TestSocket(test *testing.T) {
 		var t transport.Transport
 		t.Init(transport.Client, transport.Socket)
 
-		err := t.Write(expectedMsg)
+		err := t.Write([]byte("Hey!"))
 		if err != nil {
 			test.Fatal(err)
 		}

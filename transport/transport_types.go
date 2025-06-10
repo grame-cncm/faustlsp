@@ -2,6 +2,9 @@ package transport
 
 import "encoding/json"
 
+type URI string
+type DocumentURI string
+
 type Message struct {
 	Jsonrpc string `json:"jsonrpc"`
 }
@@ -36,23 +39,3 @@ type NotificationMessage struct {
 	Method string      `json:"method"`
 	Params json.RawMessage `json:"params,omitempty"`
 }
-
-const (
-	ParseError                    int = -32700
-	InvalidRequest                int = -32600
-	MethodNotFound                int = -32601
-	InvalidParams                 int = -32602
-	InternalError                 int = -32603
-	JSONRPCReservedErrorRangeStart int = -32099
-	ServerErrorStart              int = JSONRPCReservedErrorRangeStart
-	ServerNotInitialized          int = -32002
-	UnknownErrorCode              int = -32001
-	JSONRPCReservedErrorRangeEnd   int = -32000
-	ServerErrorEnd                int = JSONRPCReservedErrorRangeEnd
-	LSPReservedErrorRangeStart    int = -32899
-	RequestFailed                 int = -32803
-	ServerCancelled               int = -32802
-	ContentModified               int = -32801
-	RequestCancelled              int = -32800
-	LSPReservedErrorRangeEnd      int = -32800
-)

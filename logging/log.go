@@ -19,11 +19,11 @@ func Init() {
 	// Determine the log file path based on the operating system.
 	switch runtime.GOOS {
 	case "windows":
-		logPath = "log.txt"
+		logPath = "faust-lsp-log.txt"
 	case "linux", "darwin", "freebsd", "openbsd", "netbsd", "plan9":
-		logPath = "/tmp/log.txt"
+		logPath = "/tmp/faust-lsp-log.txt"
 	default:
-		logPath = "log.txt"
+		logPath = "faust-lsp-log.txt"
 	}
 
 	// Open the log file.  Create it if it doesn't exist.
@@ -32,5 +32,5 @@ func Init() {
 		panic(err)
 	}
 	// Initialize the logger to write to the file, without flags or prefixes.
-	Logger = log.New(f, "golsp: ", log.Ltime)
+	Logger = log.New(f, "faust-lsp: ", log.Ltime)
 }

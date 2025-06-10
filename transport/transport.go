@@ -88,7 +88,8 @@ func (t *Transport) Read() ([]byte, error) {
 // Writes JSON RPC message
 // TODO: Validate message as JSON RPC before sending ?
 func (t *Transport) Write(msg []byte) error {
-	_, err := t.Writer.Write(msg)
+	header := []byte("Content-Length:"+strconv.Itoa(len(msg))+"\r\n\r\n")
+	_, err := t.Writer.Write(append(header,msg...))
 	return err
 }
 
