@@ -20,6 +20,7 @@ const (
 	Initialized
 	Shutdown
 	Exit
+	ExitError
 )
 
 // Main Server Struct
@@ -43,7 +44,7 @@ func (s *Server) Init(transp transport.TransportMethod){
 
 // Might be pointless ?
 // Wanted a way to handle both cancel and ending gracefully from the loop go routine while handling or logging possible errors
-func (s *Server) Run(ctx context.Context) {
+func (s *Server) Run(ctx context.Context) error{
 	end := make(chan error, 1)
 	go s.Loop(ctx, end)
 	select {
@@ -52,12 +53,14 @@ func (s *Server) Run(ctx context.Context) {
 			errormsg := "Ending because of error ("+err.Error()+")"
 			logging.Logger.Println(errormsg)
 			fmt.Println(errormsg)
+			return errors.New(err.Error())
 		} else {
 			logging.Logger.Println("LSP Successfully Exited")
+			return nil
 		}
 	case <- ctx.Done():
 		logging.Logger.Println("Canceling Main Loop")
-		return
+		return nil
 	}
 }
 
@@ -65,10 +68,10 @@ func (s *Server) Run(ctx context.Context) {
 func (s *Server) Loop(ctx context.Context, end chan<- error){
 	var err error
 	var msg []byte
-
+	var method string
+	
 	// LSP Server Main Loop
-	for s.Status != Shutdown && !s.Transport.Closed && err == nil{
-		var method string
+	for s.Status != Exit && s.Status != ExitError && !s.Transport.Closed && err == nil{
 		// If parent cancels, make sure to stop
 		select {
 		case <-ctx.Done():
@@ -85,12 +88,13 @@ func (s *Server) Loop(ctx context.Context, end chan<- error){
 		if err != nil { break }
 
 		logging.Logger.Println("Got Method: "+method)
+		logging.Logger.Println(string(msg))
 		// Validate Message (error if the client shouldn't be sending that method)
 		err = s.ValidateMethod(method)
 		if err != nil {break}
 		
 		// Dispatch to Method Handler
-		go s.HandleMethod(method, msg)
+		go s.HandleMethod(ctx, method, msg)
 		
 		// Dirty way to handle server ending for now
 		// Goal is to handle LSP exit message and set s.Status to Exit and end
@@ -99,6 +103,7 @@ func (s *Server) Loop(ctx context.Context, end chan<- error){
 			break
 		}
 	}
+	if s.Status == ExitError { err = errors.New("Exiting Ungracefully")}
 	if err == nil && s.Transport.Closed {err = errors.New("Stream Closed: Got EOF")}
 	s.Transport.Close()
 	end <- err
@@ -122,7 +127,7 @@ func (s *Server) ValidateMethod(method string) error{
 }
 
 // Main Handle Method
-func(s *Server) HandleMethod(method string, message []byte){
+func(s *Server) HandleMethod(ctx context.Context, method string, message []byte){
 	// TODO: Receive only content, no Header
 	_, content, _:= bytes.Cut(message, []byte{'\r','\n','\r','\n'})
 	switch method {
@@ -134,7 +139,7 @@ func(s *Server) HandleMethod(method string, message []byte){
 
 		// Send Request Message to appropriate Handler
 		handler := requestHandlers[method]
-		resp, err := handler(s,m.ID,m.Params)
+		resp, err := handler(ctx,s,m.ID,m.Params)
 		if err != nil {
 			logging.Logger.Println(err)
 			return
@@ -152,13 +157,13 @@ func(s *Server) HandleMethod(method string, message []byte){
 
 
 // Map from method to method handler for request methods
-var requestHandlers = map[string]func(s *Server, id interface{}, params json.RawMessage) (json.RawMessage, error){
+var requestHandlers = map[string]func(context.Context, *Server, interface{}, json.RawMessage) (json.RawMessage, error){
 	"initialize": Initialize,
 }
 
 
 // Initialize Handler
-func Initialize(s *Server, id interface{}, par json.RawMessage) (json.RawMessage, error){
+func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMessage) (json.RawMessage, error){
 	// TODO: Error Handling
 	
 	s.Status = Initializing
@@ -191,4 +196,20 @@ func Initialize(s *Server, id interface{}, par json.RawMessage) (json.RawMessage
 	}
 	msg, err := json.Marshal(resp)
 	return msg, err
+}
+
+// Shutdown Handler
+func ShutdownEnd(ctx context.Context, s *Server, id interface{}, par json.RawMessage) (json.RawMessage, error){
+	s.Status = Shutdown
+	return []byte{}, nil
+}
+
+// Exit Handler
+func ExitEnd(ctx context.Context, s *Server, id interface{}, par json.RawMessage) (json.RawMessage, error){
+	if s.Status == Shutdown{
+		s.Status = Exit
+	} else {
+		s.Status = ExitError
+	}
+	return []byte{}, nil
 }

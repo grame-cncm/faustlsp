@@ -37,9 +37,12 @@ func main(){
 	}()
 
 	// Start running server
-	s.Run(ctx)
+	err := s.Run(ctx)
+	logging.Logger.Println("Ended")	
 	
-	logging.Logger.Println("Ended")
-	
-	return;
+	if err != nil {
+		os.Exit(1)
+	} else {
+		os.Exit(0)
+	}
 }
