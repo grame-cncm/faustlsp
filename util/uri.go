@@ -5,9 +5,9 @@ import (
 	"unicode"
 )
 
-func Uri2path(uri string) (string, error){
+func Uri2path(uri string) (string, error) {
 	url, err := url.Parse(uri)
-	if err != nil{
+	if err != nil {
 		return "", err
 	}
 	//	url.Path

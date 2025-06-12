@@ -29,7 +29,7 @@ func Init() {
 	// Open the log file.  Create it if it doesn't exist.
 	f, err := os.OpenFile(logPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
-		panic(err)
+		panic("Couldn't Open File")
 	}
 	// Initialize the logger to write to the file, without flags or prefixes.
 	Logger = log.New(f, "faust-lsp: ", log.Ltime)

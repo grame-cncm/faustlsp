@@ -11,13 +11,13 @@ import (
 	"syscall"
 )
 
-func main(){
+func main() {
 	logging.Init()
 	logging.Logger.Println("Initialized")
 
 	// Background Context for cancelling
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	var s server.Server
 
 	// Default Transport method is stdin
@@ -25,10 +25,9 @@ func main(){
 
 	// Handle Signals
 	sigs := make(chan os.Signal, 1)
-
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	go func(){
+	go func() {
 		// Cancel when a signal is received
 		<-sigs
 		cancel()
@@ -38,8 +37,8 @@ func main(){
 
 	// Start running server
 	err := s.Run(ctx)
-	logging.Logger.Println("Ended")	
-	
+	logging.Logger.Println("Ended")
+
 	if err != nil {
 		os.Exit(1)
 	} else {

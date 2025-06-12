@@ -13,13 +13,15 @@ import (
 )
 
 type TransportMethod int
+
 const (
-	Stdin   = iota
+	Stdin = iota
 	Socket
 )
 
 // Useful for socket dialling or listening based on client and server
 type TransportType int
+
 const (
 	Client = iota
 	Server
@@ -27,19 +29,20 @@ const (
 
 // Transport structure to handle reading from streams
 type Transport struct {
-	Type   TransportType       // client or server
-	Method TransportMethod     // type of stream
-	Scanner *bufio.Scanner     // reader (scanner)
-	conn   net.Conn            // connection if socket
-	Writer io.Writer            // writer
-	Closed bool
+	Type    TransportType   // client or server
+	Method  TransportMethod // type of stream
+	Scanner *bufio.Scanner  // reader (scanner)
+	conn    net.Conn        // connection to close for client
+	ln      net.Listener    // listener to close for server
+	Writer  io.Writer       // writer
+	Closed  bool
 }
 
-func (t *Transport) Init(ttype TransportType, method TransportMethod){
+func (t *Transport) Init(ttype TransportType, method TransportMethod) {
 	t.Method = method
 	t.Type = ttype
 	var r io.Reader
-	
+
 	switch t.Method {
 	// Communicate with client through stdin
 	case Stdin:
@@ -51,14 +54,14 @@ func (t *Transport) Init(ttype TransportType, method TransportMethod){
 	// TODO: take port from cmd arguments
 	case Socket:
 		var conn net.Conn
-
+		var err error
 		switch t.Type {
 		case Server:
-			ln, err := net.Listen("tcp",":5007")
+			t.ln, err = net.Listen("tcp", ":5007")
 			if err != nil {
 				logging.Logger.Fatal(err)
 			}
-			conn, err = ln.Accept()
+			conn, err = t.ln.Accept()
 			if err != nil {
 				logging.Logger.Fatal(err)
 			}
@@ -86,16 +89,55 @@ func (t *Transport) Read() ([]byte, error) {
 }
 
 // Writes JSON RPC message
-// TODO: Validate message as JSON RPC before sending ?
 func (t *Transport) Write(msg []byte) error {
-	header := []byte("Content-Length:"+strconv.Itoa(len(msg))+"\r\n\r\n")
-	_, err := t.Writer.Write(append(header,msg...))
+	header := []byte("Content-Length: " + strconv.Itoa(len(msg)) + "\r\n\r\n")
+	_, err := t.Writer.Write(append(header, msg...))
+	return err
+}
+
+// Writes JSON RPC Notif Message
+func (t *Transport) WriteNotif(method string, params json.RawMessage) error {
+	msg, err := json.Marshal(
+		NotificationMessage{
+			Message: Message{Jsonrpc: "2.0"},
+			Method:  method,
+			Params:  params,
+		})
+	if err != nil {
+		return err
+	}
+
+	header := []byte("Content-Length: " + strconv.Itoa(len(msg)) + "\r\n\r\n")
+	_, err = t.Writer.Write(append(header, msg...))
+	return err
+}
+
+// Writes JSON RPC Request Message
+func (t *Transport) WriteRequest(id interface{}, method string, params json.RawMessage) error {
+	msg, err := json.Marshal(
+		RequestMessage{
+			Message: Message{Jsonrpc: "2.0"},
+			ID:      id,
+			Method:  method,
+			Params:  params,
+		})
+	if err != nil {
+		return err
+	}
+
+	header := []byte("Content-Length: " + strconv.Itoa(len(msg)) + "\r\n\r\n")
+	logging.Logger.Println("Writing " + string(append(header, msg...)))
+	_, err = t.Writer.Write(append(header, msg...))
 	return err
 }
 
 func (t *Transport) Close() {
-	if t.Type == Client {
-		t.conn.Close()
+	if t.Method == Socket {
+		if t.Type == Client {
+			t.conn.Close()
+		} else {
+			t.ln.Close()
+		}
 	}
 }
 
@@ -108,7 +150,7 @@ func split(data []byte, _ bool) (advance int, token []byte, err error) {
 
 	// Content-Length: <number>
 	if len(header) < len("Content-Length: ") {
-		return 0, nil, errors.New("Invalid Header: "+string(header))
+		return 0, nil, errors.New("Invalid Header: " + string(header))
 	}
 	contentLengthBytes := header[len("Content-Length: "):]
 	contentLength, err := strconv.Atoi(string(contentLengthBytes))
@@ -130,7 +172,7 @@ func GetMethod(message []byte) (method string, error error) {
 	if !found {
 		return "", nil
 	}
-	
+
 	err := json.Unmarshal(content, &msg)
 	return msg.Method, err
 }
