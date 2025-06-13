@@ -86,140 +86,20 @@ func (workspace *Workspace) StartTrackingChanges(ctx context.Context, s *Server)
 		return nil
 	})
 
-	replicdir := s.tempDir
-
 	for {
 		select {
 		// Editor TextDocument Events
-		// Assumes Method Handler as handled this event and has this file in Files Store
+		// Assumes Method Handler has handled this event and has this file in Files Store
 		case change := <-workspace.TDEvents:
-			logging.Logger.Printf("Handling TD Event: %d\n", change)
-			file, ok := s.Files.Get(change.Path)
-			if !ok {
-				logging.Logger.Fatalf("File %s should've been in File Store.", change.Path)
-			}
-
-			workspaceFolderName := filepath.Base(workspace.Root)
-			temp_path := filepath.Join(replicdir, workspaceFolderName, file.RelPath)
-			switch change.Type {
-			case TDOpen:
-				// Ensure directory exists before creating file
-				dirPath := filepath.Dir(temp_path)
-				if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-					err := os.MkdirAll(dirPath, 0755)
-					if err != nil {
-						logging.Logger.Fatalf("failed to create directory: %s", err)
-						break
-					}
-				}
-
-				// Create File in Temporary Directory
-				f, err := os.Create(temp_path)
-				if err != nil {
-					logging.Logger.Fatal(err)
-				}
-				f.Close()
-			case TDChange:
-				// Write File to Temporary Directory
-				logging.Logger.Printf("Writing recent change to %s\n", temp_path)
-				os.WriteFile(temp_path, file.Content, fs.FileMode(os.O_TRUNC))
-			case TDClose:
-				// Sync file from disk on close if it exists and replicate it to temporary directory, else remove from Files Store
-				if fs.ValidPath(change.Path) {
-					s.Files.OpenFromPath(change.Path, s.Workspace.Root, false)
-					file, _ := s.Files.Get(change.Path)
-					workspace.Files[change.Path] = file
-					file, ok := s.Files.Get(change.Path)
-					if ok {
-						os.WriteFile(temp_path, file.Content, os.FileMode(os.O_TRUNC))
-					}
-				} else {
-					s.Files.Remove(change.Path)
-				}
-
-			}
+			logging.Logger.Printf("Handling TD Event: %v\n", change)
+			workspace.HandleEditorEvent(change, s)
 		// Disk Events
 		case event, ok := <-watcher.Events:
 			logging.Logger.Printf("Handling Workspace Disk Event: %s\n", event)
 			if !ok {
 				return
 			}
-			// Path of original file
-			path := event.Name
-			// Path to replicate file
-			rel_path := path[len(workspace.Root)+1:]
-			workspaceFolderName := filepath.Base(workspace.Root)
-			temp_path := filepath.Join(replicdir, workspaceFolderName, rel_path)
-
-			// If file of this path is already open in File Store, ignore this event
-			file, ok := s.Files.Get(path)
-			if ok {
-				if file.Open {
-					break
-				}
-			}
-
-			// OS CREATE Event
-			if event.Has(fsnotify.Create) {
-				if event.RenamedFrom == "" {
-					// Normal New File
-					// Ensure path exists to copy
-					// Sometimes files get deleted by text editors before this goroutine can handle it
-					fi, err := os.Stat(path)
-					if err != nil {
-						break
-					}
-
-					// If it is a directory, mkdir
-					if fi.IsDir() {
-						os.MkdirAll(temp_path, fi.Mode().Perm())
-						// Add this new directory to watch as watcher does not recursively watch subdirectories
-						watcher.Add(path)
-					} else {
-						// Add it our server tracking and workspace
-						s.Files.OpenFromPath(path, s.Workspace.Root, false)
-						file, _ := s.Files.Get(path)
-						workspace.Files[path] = file
-
-						f, err := os.Create(temp_path)
-						if err != nil {
-							panic(err)
-						}
-						f.Chmod(fi.Mode())
-						f.Close()
-					}
-
-				} else {
-					// Rename Create
-					rel_path := event.RenamedFrom[len(workspace.Root)+1:]
-					old_temp_path := filepath.Join(replicdir, workspaceFolderName, rel_path)
-					if fs.ValidPath(temp_path) && fs.ValidPath(old_temp_path) {
-						err := os.Rename(old_temp_path, temp_path)
-						if err != nil {
-							break
-						}
-					}
-					fi, _ := os.Stat(path)
-					if fi.IsDir() {
-						// Add this new directory to watch as watcher does not recursively watch subdirectories
-						watcher.Add(path)
-					}
-				}
-			}
-
-			// OS REMOVE Event
-			if event.Has(fsnotify.Remove) {
-				s.Files.Remove(path)
-				delete(workspace.Files, path)
-				os.Remove(temp_path)
-			}
-
-			// OS WRITE Event
-			if event.Has(fsnotify.Write) {
-				contents, _ := os.ReadFile(path)
-				os.WriteFile(temp_path, contents, fs.FileMode(os.O_TRUNC))
-				s.Files.ModifyFull(path, string(contents))
-			}
+			workspace.HandleDiskEvent(event, s, watcher)
 		// Watcher Errors
 		case _, ok := <-watcher.Errors:
 			if !ok {
@@ -231,4 +111,160 @@ func (workspace *Workspace) StartTrackingChanges(ctx context.Context, s *Server)
 			return
 		}
 	}
+}
+
+func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, watcher *fsnotify.Watcher) {
+	// Path of original file
+	origPath := event.Name
+
+	// Temporary Directory to use
+	tempDir := s.tempDir
+
+	// If file of this path is already open in File Store, ignore this event
+	file, ok := s.Files.Get(origPath)
+	if ok {
+		if file.Open {
+			return
+		}
+	}
+
+	// Path relative to workspace
+	relPath := origPath[len(workspace.Root)+1:]
+	// Workspace Folder name
+	workspaceFolderName := filepath.Base(workspace.Root)
+
+	// The equivalent of the workspace file path for the temporary directory
+	// Should be of the form TEMP_DIR/WORKSPACE_FOLDER_NAME/relPath
+	tempDirFilePath := filepath.Join(tempDir, workspaceFolderName, relPath)
+
+	// OS CREATE Event
+	if event.Has(fsnotify.Create) {
+		// Check if this is a rename Create or a normal new file create. fsnotify sends a rename and create event on file renames and the create event has the RenamedFrom field
+		if event.RenamedFrom == "" {
+			// Normal New File
+			// Ensure path exists to copy
+			// Sometimes files get deleted by text editors before this goroutine can handle it
+			fi, err := os.Stat(origPath)
+			if err != nil {
+				return
+			}
+
+			if fi.IsDir() {
+				// If a directory is being created, mkdir instead of create
+				os.MkdirAll(tempDirFilePath, fi.Mode().Perm())
+				// Add this new directory to watch as watcher does not recursively watch subdirectories
+				watcher.Add(origPath)
+			} else {
+				// Add it our server tracking and workspace
+				s.Files.OpenFromPath(origPath, s.Workspace.Root, false)
+				workspace.addFileFromFileStore(origPath, s)
+
+				// Create File
+				f, err := os.Create(tempDirFilePath)
+				if err != nil {
+					logging.Logger.Fatal(err)
+				}
+				f.Chmod(fi.Mode())
+				f.Close()
+			}
+		} else {
+			// Rename Create
+			oldFileRelPath := event.RenamedFrom[len(workspace.Root)+1:]
+			oldTempPath := filepath.Join(tempDir, workspaceFolderName, oldFileRelPath)
+
+			if fs.ValidPath(tempDirFilePath) && fs.ValidPath(oldTempPath) {
+				err := os.Rename(oldTempPath, tempDirFilePath)
+				if err != nil {
+					return
+				}
+			}
+
+			fi, _ := os.Stat(origPath)
+			if fi.IsDir() {
+				// Add this new directory to watch as watcher does not recursively watch subdirectories
+				watcher.Add(origPath)
+			}
+		}
+	}
+
+	// OS REMOVE Event
+	if event.Has(fsnotify.Remove) {
+		// Remove from File Store, Workspace and Temp Directory
+		s.Files.Remove(origPath)
+		workspace.removeFile(origPath)
+		os.Remove(tempDirFilePath)
+	}
+
+	// OS WRITE Event
+	if event.Has(fsnotify.Write) {
+		contents, _ := os.ReadFile(origPath)
+		os.WriteFile(tempDirFilePath, contents, fs.FileMode(os.O_TRUNC))
+		s.Files.ModifyFull(origPath, string(contents))
+	}
+}
+
+func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
+	// Temporary Directory
+	tempDir := s.tempDir
+
+	// Path of File that this Event affected
+	origFilePath := change.Path
+
+	file, ok := s.Files.Get(origFilePath)
+	if !ok {
+		logging.Logger.Fatalf("File %s should've been in File Store.", origFilePath)
+	}
+
+	workspaceFolderName := filepath.Base(workspace.Root)
+	tempDirFilePath := filepath.Join(tempDir, workspaceFolderName, file.RelPath) // Construct the temporary file path
+	switch change.Type {
+	case TDOpen:
+		// Ensure directory exists before creating file. This mirrors the workspace's directory structure in the temp directory.
+		dirPath := filepath.Dir(tempDirFilePath)
+		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+			err := os.MkdirAll(dirPath, 0755) // Create the directory and all parent directories with permissions 0755
+			if err != nil {
+				logging.Logger.Fatalf("failed to create directory: %s", err)
+				break
+			}
+		}
+
+		// Create File in Temporary Directory. This creates an empty file at the temp path.
+		f, err := os.Create(tempDirFilePath)
+		if err != nil {
+			logging.Logger.Fatal(err)
+		}
+		f.Close()
+	case TDChange:
+		// Write File to Temporary Directory. Updates the temporary file with the latest content from the editor.
+		logging.Logger.Printf("Writing recent change to %s\n", tempDirFilePath)
+		os.WriteFile(tempDirFilePath, file.Content, fs.FileMode(os.O_TRUNC)) // Write the file content to the temp file, overwriting existing content
+	case TDClose:
+		// Sync file from disk on close if it exists and replicate it to temporary directory, else remove from Files Store
+		if fs.ValidPath(origFilePath) { // Check if the file path is valid
+			s.Files.OpenFromPath(origFilePath, s.Workspace.Root, false) // Reload the file from the specified path.
+			workspace.addFileFromFileStore(origFilePath, s)
+
+			file, ok := s.Files.Get(origFilePath) // Retrieve the file again (unnecessary, can use the previous `file`)
+			if ok {
+				os.WriteFile(tempDirFilePath, file.Content, os.FileMode(os.O_TRUNC)) // Write content to temporary file, replicating it from disk.
+			}
+		} else {
+			s.Files.Remove(origFilePath) // Remove the file from the file store if the path isn't valid
+		}
+
+	}
+}
+
+func (workspace *Workspace) addFileFromFileStore(path util.Path, s *Server) {
+	file, _ := s.Files.Get(path)
+	workspace.mu.Lock()
+	workspace.Files[path] = file
+	workspace.mu.Unlock()
+}
+
+func (workspace *Workspace) removeFile(path util.Path) {
+	workspace.mu.Lock()
+	delete(workspace.Files, path)
+	workspace.mu.Unlock()
 }
