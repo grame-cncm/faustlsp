@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"os"
 
 	"faustlsp/logging"
 	"faustlsp/transport"
+	"faustlsp/util"
 )
 
 // Initialize Handler
@@ -33,7 +35,11 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 		},
 		ServerInfo: &transport.ServerInfo{Name: "faust-lsp", Version: "0.0.1"},
 	}
-	logging.Logger.Printf("Workspaces Support: %v\n", params.WorkspaceFolders)
+
+	rootPath, _ := util.Uri2path(string(params.RootURI))
+	logging.Logger.Printf("Workspace: %v\n", rootPath)
+	s.Workspace.Root = rootPath
+
 	resultBytes, err := json.Marshal(result)
 	if err != nil {
 		return []byte{}, nil
@@ -51,7 +57,7 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 func Initialized(ctx context.Context, s *Server, par json.RawMessage) error {
 	logging.Logger.Println("Handling Initialized")
 	s.Status = Running
-
+	s.Workspace.Init(ctx, s)
 	// Send WorkspaceFolders Request
 	// TODO: Do this only if server-client agreed on workspacefolders
 	//	err := s.Transport.WriteRequest(s.reqIdCtr,"workspace/workspaceFolders", []byte{})
@@ -65,7 +71,17 @@ func Initialized(ctx context.Context, s *Server, par json.RawMessage) error {
 // Shutdown Handler
 func ShutdownEnd(ctx context.Context, s *Server, id interface{}, par json.RawMessage) (json.RawMessage, error) {
 	s.Status = Shutdown
-	return []byte{}, nil
+	var result = transport.ResponseMessage{
+		Message: transport.Message{Jsonrpc: "2.0"},
+		ID:      id,
+		Result:  []byte("{}"),
+	}
+	// Some Clients end the server right after sending shutdown like emacs lsp-mode
+	// Remove Temp Dir just in case
+	os.RemoveAll(s.tempDir)
+
+	content, err := json.Marshal(result)
+	return content, err
 }
 
 // Exit Handler

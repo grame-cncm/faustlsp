@@ -7,7 +7,9 @@ import (
 	"errors"
 	"faustlsp/logging"
 	"faustlsp/transport"
+	"faustlsp/util"
 	"fmt"
+	"os"
 	"reflect"
 	"sync"
 )
@@ -29,8 +31,9 @@ const (
 type Server struct {
 	// TODO: workspaceFolders, diagnosticsBundle, mutex
 	// TODO: request id counter so that we can send our own requests
-	Workspaces []Workspace
-	Files      Files
+	// Workspace and Files are different because in future should allow having multiple workspaces while having one main File Store, but both have to be synchronized on each document Change
+	Workspace Workspace
+	Files     Files
 
 	Status ServerState
 	mu     sync.Mutex
@@ -41,6 +44,9 @@ type Server struct {
 
 	// Request Id Counter for new requests
 	reqIdCtr int
+
+	// Temporary Directory where we replicate workspace for diagnostics
+	tempDir util.Path
 }
 
 // Initialize Server
@@ -48,12 +54,24 @@ func (s *Server) Init(transp transport.TransportMethod) {
 	s.Status = Created
 	s.Transport.Init(transport.Server, transp)
 	s.Files.Init()
+
+	// Create Temporary Directory
+	os_temp := os.TempDir()
+	temp_dir, err := os.MkdirTemp(os_temp, "faustlsp-")
+	if err != nil {
+		logging.Logger.Fatalf("Couldn't create temp dir: %s\n", err)
+		return
+	} else {
+		logging.Logger.Printf("Created Temp Directory at %s\n", temp_dir)
+	}
+	s.tempDir = temp_dir
 	return
 }
 
 // Might be pointless ?
 // Wanted a way to handle both cancel and ending gracefully from the loop go routine while handling or logging possible errors
 func (s *Server) Run(ctx context.Context) error {
+	var returnError error
 	end := make(chan error, 1)
 	go s.Loop(ctx, end)
 	select {
@@ -62,16 +80,16 @@ func (s *Server) Run(ctx context.Context) error {
 			errormsg := "Ending because of error (" + err.Error() + ")"
 			logging.Logger.Println(errormsg)
 			fmt.Println(errormsg)
-			return errors.New(err.Error())
+			returnError = errors.New(err.Error())
 		} else {
 			logging.Logger.Println("LSP Successfully Exited")
-			return nil
 		}
 	case <-ctx.Done():
 		logging.Logger.Println("Canceling Main Loop")
-		return nil
 	}
 
+	os.RemoveAll(s.tempDir)
+	return returnError
 }
 
 // The central LSP server loop
