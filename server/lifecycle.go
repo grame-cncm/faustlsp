@@ -26,12 +26,14 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 			TextDocumentSync: transport.Full,
 			Workspace: &transport.WorkspaceOptions{
 				WorkspaceFolders: &transport.WorkspaceFolders5Gn{
-					Supported: true,
+					Supported:           true,
+					ChangeNotifications: "ws",
 				},
 			},
 		},
 		ServerInfo: &transport.ServerInfo{Name: "faust-lsp", Version: "0.0.1"},
 	}
+	logging.Logger.Printf("Workspaces Support: %v\n", params.WorkspaceFolders)
 	resultBytes, err := json.Marshal(result)
 	if err != nil {
 		return []byte{}, nil
@@ -43,6 +45,21 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 	}
 	msg, err := json.Marshal(resp)
 	return msg, err
+}
+
+// Initialized Handler
+func Initialized(ctx context.Context, s *Server, par json.RawMessage) error {
+	logging.Logger.Println("Handling Initialized")
+	s.Status = Running
+
+	// Send WorkspaceFolders Request
+	// TODO: Do this only if server-client agreed on workspacefolders
+	//	err := s.Transport.WriteRequest(s.reqIdCtr,"workspace/workspaceFolders", []byte{})
+	//	if err != nil {
+	//		logging.Logger.Fatal(err)
+	//	}
+	//	s.reqIdCtr+=1
+	return nil
 }
 
 // Shutdown Handler

@@ -4,8 +4,7 @@ import "sync"
 
 type Workspace struct {
 	// Path to Root Directory of Workspace
-	Root string
+	Root  string
 	Files map[string]*File
-	mu sync.Mutex
-
+	mu    sync.Mutex
 }

@@ -8,6 +8,7 @@ import (
 	"faustlsp/logging"
 	"faustlsp/transport"
 	"fmt"
+	"reflect"
 	"sync"
 )
 
@@ -18,11 +19,10 @@ type ServerState int
 const (
 	Created = iota
 	Initializing
-	Initialized
+	Running
 	Shutdown
 	Exit
 	ExitError
-	n
 )
 
 // Main Server Struct
@@ -30,14 +30,17 @@ type Server struct {
 	// TODO: workspaceFolders, diagnosticsBundle, mutex
 	// TODO: request id counter so that we can send our own requests
 	Workspaces []Workspace
-	Files Files
-	
+	Files      Files
+
 	Status ServerState
-	mu sync.Mutex
+	mu     sync.Mutex
 
 	// Allows to add other transportation methods in the future
 	// possible values: stdin | socket
 	Transport transport.Transport
+
+	// Request Id Counter for new requests
+	reqIdCtr int
 }
 
 // Initialize Server
@@ -68,6 +71,7 @@ func (s *Server) Run(ctx context.Context) error {
 		logging.Logger.Println("Canceling Main Loop")
 		return nil
 	}
+
 }
 
 // The central LSP server loop
@@ -156,7 +160,10 @@ func (s *Server) HandleMethod(ctx context.Context, method string, message []byte
 	if ok {
 		var m transport.RequestMessage
 		json.Unmarshal(content, &m)
-
+		logging.Logger.Printf("Got type of ID: %s\n", reflect.TypeOf(m.ID))
+		if reflect.TypeOf(m.ID).String() == "float64" {
+			s.reqIdCtr = int(m.ID.(float64) + 1)
+		}
 		resp, err := handler(ctx, s, m.ID, m.Params)
 		if err != nil {
 			logging.Logger.Println(err)
@@ -170,6 +177,7 @@ func (s *Server) HandleMethod(ctx context.Context, method string, message []byte
 				logging.Logger.Println(err)
 			}
 		}
+		return
 	}
 	handler2, ok := notificationHandlers[method]
 	if ok {
@@ -194,8 +202,10 @@ var requestHandlers = map[string]func(context.Context, *Server, interface{}, jso
 
 // Map from method to method handler for request methods
 var notificationHandlers = map[string]func(context.Context, *Server, json.RawMessage) error{
-	"textDocument/didOpen": TextDocumentOpen,
+	"initialized":            Initialized,
+	"textDocument/didOpen":   TextDocumentOpen,
 	"textDocument/didChange": TextDocumentChange,
-	"textDocument/didClose": TextDocumentClose,	
+	"textDocument/didClose":  TextDocumentClose,
+	// The save action of textDocument/didSave should be handled by our watcher to our store, so no need to handle
 	"exit": ExitEnd,
 }

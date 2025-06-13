@@ -107,8 +107,7 @@ func (t *Transport) WriteNotif(method string, params json.RawMessage) error {
 		return err
 	}
 
-	header := []byte("Content-Length: " + strconv.Itoa(len(msg)) + "\r\n\r\n")
-	_, err = t.Writer.Write(append(header, msg...))
+	_, err = t.Writer.Write(msg)
 	return err
 }
 
@@ -125,9 +124,8 @@ func (t *Transport) WriteRequest(id interface{}, method string, params json.RawM
 		return err
 	}
 
-	header := []byte("Content-Length: " + strconv.Itoa(len(msg)) + "\r\n\r\n")
-	logging.Logger.Println("Writing " + string(append(header, msg...)))
-	_, err = t.Writer.Write(append(header, msg...))
+	logging.Logger.Println("Writing " + string(msg))
+	_, err = t.Writer.Write(msg)
 	return err
 }
 

@@ -48,9 +48,9 @@ func (files *Files) OpenFromPath(path util.Path) {
 		}
 	} else {
 		file = File{
-			Path: path,
+			Path:    path,
 			Content: []byte{},
-			Open: true,
+			Open:    true,
 		}
 	}
 	files.mu.Lock()
@@ -82,7 +82,6 @@ func (files *Files) CloseFromURI(uri util.Uri) {
 	files.Close(path)
 }
 
-
 func (files *Files) Close(path util.Path) {
 	files.mu.Lock()
 	f, ok := files.fs[path]
@@ -94,11 +93,10 @@ func (files *Files) Close(path util.Path) {
 	files.mu.Unlock()
 }
 
-
-func (files *Files) String() string{
-	str:=""
-	for path, f := range(files.fs){
-		str+=fmt.Sprintf("%s\n %s\n",path,string(f.Content))
+func (files *Files) String() string {
+	str := ""
+	for path, f := range files.fs {
+		str += fmt.Sprintf("%s\n %s\n", path, string(f.Content))
 	}
 	return str
 }

@@ -17,7 +17,7 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	// Open File
 	s.Files.OpenFromURI(string(fileURI))
 
-	logging.Logger.Printf("Opening File %s\n",string(fileURI))
+	logging.Logger.Printf("Opening File %s\n", string(fileURI))
 	logging.Logger.Printf("Current Files: %v\n", s.Files)
 	return nil
 }
@@ -36,10 +36,10 @@ func TextDocumentChange(ctx context.Context, s *Server, par json.RawMessage) err
 	if err != nil {
 		return err
 	}
-	for _, change := range(params.ContentChanges){
+	for _, change := range params.ContentChanges {
 		s.Files.ModifyFull(path, change.Text)
 	}
-	logging.Logger.Printf("Modified File %s\n",string(fileURI))
+	logging.Logger.Printf("Modified File %s\n", string(fileURI))
 	logging.Logger.Printf("Current Files: %s\n", s.Files)
 	return nil
 }
@@ -49,10 +49,10 @@ func TextDocumentClose(ctx context.Context, s *Server, par json.RawMessage) erro
 	json.Unmarshal(par, &params)
 
 	fileURI := params.TextDocument.URI
-	
+
 	s.Files.CloseFromURI(util.Path(params.TextDocument.URI))
 
-	logging.Logger.Printf("Closed File %s\n",string(fileURI))
+	logging.Logger.Printf("Closed File %s\n", string(fileURI))
 	logging.Logger.Printf("Current Files: %s\n", s.Files)
 	return nil
 }

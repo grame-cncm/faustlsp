@@ -14,7 +14,7 @@ import (
 func TestExitWithoutError(t *testing.T) {
 	logging.Init()
 	logging.Logger.Println("Starting")
-	var s server.Server
+	var s server.Serve
 
 	runserver := func() error {
 		s.Init(transport.Socket)
@@ -51,7 +51,7 @@ func TestExitWithError(t *testing.T) {
 	logging.Init()
 	logging.Logger.Println("Starting")
 
-	var s server.Server
+	var s server.Serve
 	ctx, cancel := context.WithCancel(context.Background())
 	runserver := func() error {
 		s.Init(transport.Socket)
