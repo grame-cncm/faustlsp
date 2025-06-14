@@ -42,7 +42,7 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 	})
 
 	logging.Logger.Printf("Workspace Files: %v\n", workspace.Files)
-	logging.Logger.Printf("File Store: %\n", s.Files)
+	logging.Logger.Printf("File Store: %s\n", s.Files.String())
 
 	// Replicate Workspace in our Temp Dir by copying
 	folder := filepath.Base(workspace.Root)
