@@ -21,12 +21,14 @@ type File struct {
 
 type Files struct {
 	// Absolute Paths Only
-	fs map[util.Path]*File
-	mu sync.Mutex
+	fs       map[util.Path]*File
+	mu       sync.Mutex
+	encoding transport.PositionEncodingKind // Position Encoding for applying incremental changes. UTF-16 and UTF-32 supported
 }
 
-func (files *Files) Init() {
+func (files *Files) Init(encoding transport.PositionEncodingKind) {
 	files.fs = make(map[string]*File)
+	files.encoding = encoding
 }
 
 func (files *Files) OpenFromURI(uri util.Uri, root util.Path, editorOpen bool) {
@@ -61,8 +63,8 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 	content, err := os.ReadFile(path)
 
 	if err != nil {
-		if os.IsNotExist(err){
-			logging.Logger.Println("Invalid Path "+err.Error())
+		if os.IsNotExist(err) {
+			logging.Logger.Println("Invalid Path " + err.Error())
 		}
 	}
 
@@ -105,20 +107,20 @@ func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Rang
 		logging.Logger.Printf("error: file to modify not in file store (%s)\n", path)
 		return
 	}
-	result := ApplyIncrementalChange(changeRange, content, string(f.Content))
+	result := ApplyIncrementalChange(changeRange, content, string(f.Content), string(files.encoding))
 	//	logging.Logger.Printf("Before:\n%s\nAfter:\n%s\n", string(f.Content), result)
 	f.Content = []byte(result)
 	files.mu.Unlock()
 }
 
-func ApplyIncrementalChange(r transport.Range, newContent string, content string) string {
-	start, _ := PositionToOffset(r.Start, content)
-	end, _ := PositionToOffset(r.End, content)
+func ApplyIncrementalChange(r transport.Range, newContent string, content string, encoding string) string {
+	start, _ := PositionToOffset(r.Start, content, encoding)
+	end, _ := PositionToOffset(r.End, content, encoding)
 	//	logging.Logger.Printf("Start: %d, End: %d\n", start, end)
 	return content[:start] + newContent + content[end:]
 }
 
-func PositionToOffset(pos transport.Position, s string) (uint, error) {
+func PositionToOffset(pos transport.Position, s string, encoding string) (uint, error) {
 	if len(s) == 0 {
 		return 0, nil
 	}
@@ -132,9 +134,23 @@ func PositionToOffset(pos transport.Position, s string) (uint, error) {
 	currChar := indices[pos.Line]
 	//	logging.Logger.Printf("Line Start: %d\n", currChar)
 	for i := 0; i < int(pos.Character); i++ {
-		_, w := utf8.DecodeRuneInString(s[currChar:])
+		r, w := utf8.DecodeRuneInString(s[currChar:])
 		currChar += uint(w)
 		//		fmt.Printf("Curr Char rn: %d\n",currChar)
+
+		// If protocol is sending utf-16 offset, increment current character index if it has surrogate code-point
+		if encoding == "utf-16" {
+			//			logging.Logger.Println("Got UTF-16 Encoding")
+			if r >= 0x10000 {
+				i++
+				if i == int(pos.Character) {
+					break
+				}
+			}
+			// Some clients like emacs lsp-mode do not properly support utf-16
+		} else if encoding == "utf-32" {
+			//			logging.Logger.Println("Got UTF-32 Encoding")
+		}
 	}
 	return currChar, nil
 }

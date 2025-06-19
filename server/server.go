@@ -31,6 +31,9 @@ const (
 type Server struct {
 	// TODO: workspaceFolders, diagnosticsBundle, mutex
 	// TODO: request id counter so that we can send our own requests
+	// Capabalities
+	Capabilities transport.ServerCapabilities
+
 	// Workspace and Files are different because in future should allow having multiple workspaces while having one main File Store, but both have to be synchronized on each document Change
 	Workspace Workspace
 	Files     Files
@@ -53,7 +56,6 @@ type Server struct {
 func (s *Server) Init(transp transport.TransportMethod) {
 	s.Status = Created
 	s.Transport.Init(transport.Server, transp)
-	s.Files.Init()
 
 	// Create Temporary Directory
 	os_temp := os.TempDir()

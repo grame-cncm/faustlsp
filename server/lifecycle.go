@@ -18,13 +18,15 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 	logging.Logger.Printf("Handling Initialize(id: %v)", id)
 	var params transport.InitializeParams
 	json.Unmarshal(par, &params)
-	logging.Logger.Println(params)
+	logging.Logger.Println(string(par))
 
 	// TODO: Choose ServerCapabilities based on ClientCapabilities
 	// Server Capabilities
+	positionEncoding := params.Capabilities.General.PositionEncodings[0]
 	var result transport.InitializeResult = transport.InitializeResult{
 		Capabilities: transport.ServerCapabilities{
 			// TODO: Implement Incremental Changes for better synchronization
+			PositionEncoding: &positionEncoding,
 			TextDocumentSync: transport.Incremental,
 			Workspace: &transport.WorkspaceOptions{
 				WorkspaceFolders: &transport.WorkspaceFolders5Gn{
@@ -35,6 +37,7 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 		},
 		ServerInfo: &transport.ServerInfo{Name: "faust-lsp", Version: "0.0.1"},
 	}
+	s.Capabilities = result.Capabilities
 
 	rootPath, _ := util.Uri2path(string(params.RootURI))
 	logging.Logger.Printf("Workspace: %v\n", rootPath)
@@ -57,6 +60,7 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 func Initialized(ctx context.Context, s *Server, par json.RawMessage) error {
 	logging.Logger.Println("Handling Initialized")
 	s.Status = Running
+	s.Files.Init(*s.Capabilities.PositionEncoding)
 	s.Workspace.Init(ctx, s)
 	// Send WorkspaceFolders Request
 	// TODO: Do this only if server-client agreed on workspacefolders
