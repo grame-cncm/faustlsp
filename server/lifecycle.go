@@ -25,7 +25,7 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 	var result transport.InitializeResult = transport.InitializeResult{
 		Capabilities: transport.ServerCapabilities{
 			// TODO: Implement Incremental Changes for better synchronization
-			TextDocumentSync: transport.Full,
+			TextDocumentSync: transport.Incremental,
 			Workspace: &transport.WorkspaceOptions{
 				WorkspaceFolders: &transport.WorkspaceFolders5Gn{
 					Supported:           true,

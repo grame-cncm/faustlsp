@@ -32,7 +32,7 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 		if !info.IsDir() {
 			_, ok := s.Files.Get(path)
 			if !ok {
-				//				logging.Logger.Printf("Opening file from workspace: %s\n", path)
+				logging.Logger.Printf("Opening file from workspace: %s\n", path)
 				s.Files.OpenFromPath(path, workspace.Root, false)
 				file, _ := s.Files.Get(path)
 				workspace.Files[path] = file
@@ -172,7 +172,7 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 			oldFileRelPath := event.RenamedFrom[len(workspace.Root)+1:]
 			oldTempPath := filepath.Join(tempDir, workspaceFolderName, oldFileRelPath)
 
-			if fs.ValidPath(tempDirFilePath) && fs.ValidPath(oldTempPath) {
+			if util.IsValidPath(tempDirFilePath) && util.IsValidPath(oldTempPath) {
 				err := os.Rename(oldTempPath, tempDirFilePath)
 				if err != nil {
 					return
@@ -241,7 +241,7 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 		os.WriteFile(tempDirFilePath, file.Content, fs.FileMode(os.O_TRUNC)) // Write the file content to the temp file, overwriting existing content
 	case TDClose:
 		// Sync file from disk on close if it exists and replicate it to temporary directory, else remove from Files Store
-		if fs.ValidPath(origFilePath) { // Check if the file path is valid
+		if util.IsValidPath(origFilePath) { // Check if the file path is valid
 			s.Files.OpenFromPath(origFilePath, s.Workspace.Root, false) // Reload the file from the specified path.
 			workspace.addFileFromFileStore(origFilePath, s)
 

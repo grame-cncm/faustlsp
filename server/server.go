@@ -222,7 +222,7 @@ var requestHandlers = map[string]func(context.Context, *Server, interface{}, jso
 var notificationHandlers = map[string]func(context.Context, *Server, json.RawMessage) error{
 	"initialized":            Initialized,
 	"textDocument/didOpen":   TextDocumentOpen,
-	"textDocument/didChange": TextDocumentChange,
+	"textDocument/didChange": TextDocumentChangeIncremental,
 	"textDocument/didClose":  TextDocumentClose,
 	// The save action of textDocument/didSave should be handled by our watcher to our store, so no need to handle
 	"exit": ExitEnd,
