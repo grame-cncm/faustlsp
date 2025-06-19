@@ -22,7 +22,16 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 
 	// TODO: Choose ServerCapabilities based on ClientCapabilities
 	// Server Capabilities
-	positionEncoding := params.Capabilities.General.PositionEncodings[0]
+
+	// Don't select UTF-8, select UTF-32 and UTF-16 only
+	var positionEncoding transport.PositionEncodingKind
+	if params.Capabilities.General.PositionEncodings[0] == "utf-16"{
+		positionEncoding = transport.UTF16
+	} else if params.Capabilities.General.PositionEncodings[0] == "utf-32"{
+		positionEncoding = transport.UTF32
+	} else {
+		positionEncoding = transport.UTF16
+	}
 	var result transport.InitializeResult = transport.InitializeResult{
 		Capabilities: transport.ServerCapabilities{
 			// TODO: Implement Incremental Changes for better synchronization
