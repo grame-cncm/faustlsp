@@ -85,6 +85,7 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 	var treemade bool
 	ext := filepath.Ext(path)
 	if ext == ".dsp" || ext == ".lib" {
+		//		logging.Logger.Printf("Trying to parse %s\n", content)
 		tree = parser.ParseTree(content)
 		treemade = true
 	} else {
@@ -127,6 +128,7 @@ func (files *Files) ModifyFull(path util.Path, content string) {
 		if f.treeCreated {
 			f.Tree.Close()
 		}
+		//		logging.Logger.Printf("Trying to parse %s\n", f.Content)
 		f.Tree = parser.ParseTree(f.Content)
 		f.treeCreated = true
 	}
@@ -151,6 +153,7 @@ func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Rang
 		if f.treeCreated {
 			f.Tree.Close()
 		}
+		//		logging.Logger.Printf("Trying to parse %s\n", f.Content)
 		f.Tree = parser.ParseTree(f.Content)
 		f.treeCreated = true
 	}

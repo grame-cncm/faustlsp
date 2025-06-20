@@ -1,9 +1,11 @@
 package parser
 
 import (
+	. "faustlsp/transport"
+	"sync"
+
 	tree_sitter_faust "github.com/khiner/tree-sitter-faust/bindings/go"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
-	. "faustlsp/transport"
 )
 
 // TODO: Need mapping from LSP UTF-16 to TS UTF-8 and vice-versa
@@ -15,6 +17,7 @@ type TSParser struct {
 	language     *tree_sitter.Language
 	parser       *tree_sitter.Parser
 	treesToClose []*tree_sitter.Tree
+	mu           sync.Mutex
 }
 
 var tsParser TSParser
@@ -30,10 +33,15 @@ type TSQueryResult struct {
 }
 
 func ParseTree(code []byte) *tree_sitter.Tree {
+	//	tsParser.parser = tree_sitter.NewParser()
+	//	tsParser.parser.SetLanguage(tsParser.language)
+	tsParser.mu.Lock()
 	tree := tsParser.parser.Parse(code, nil)
+	//	tsParser.parser.Close()
+	tsParser.parser.Reset()
+	tsParser.mu.Unlock()
 	return tree
 }
-
 
 func DocumentSymbols(tree *tree_sitter.Tree, content []byte) []DocumentSymbol {
 	cursor := tree.Walk()
@@ -54,6 +62,11 @@ func DocumentSymbolsRecursiveNoEnvironment(node *tree_sitter.Node, content []byt
 		//		iend := ident.EndPosition()
 		start := node.StartPosition()
 		end := node.EndPosition()
+		if name == "function_definition" {
+			s.Kind = Function
+		} else if name == "definition" {
+			s.Kind = Variable
+		}
 		s.SelectionRange = Range{
 			Start: Position{Line: uint32(start.Row), Character: uint32(start.Column)},
 			End:   Position{Line: uint32(end.Row), Character: uint32(end.Column)},
@@ -68,7 +81,7 @@ func DocumentSymbolsRecursiveNoEnvironment(node *tree_sitter.Node, content []byt
 		for i := uint(0); i < node.ChildCount(); i++ {
 			n := node.Child(i)
 			node := DocumentSymbolsRecursive(n, content)
-			if node.Name != "" { 
+			if node.Name != "" {
 				s.Children = append(s.Children, node)
 			}
 		}
@@ -76,7 +89,6 @@ func DocumentSymbolsRecursiveNoEnvironment(node *tree_sitter.Node, content []byt
 	} else {
 		return DocumentSymbol{}
 	}
-
 
 }
 
@@ -86,6 +98,12 @@ func DocumentSymbolsRecursive(node *tree_sitter.Node, content []byte) DocumentSy
 	if name == "definition" || name == "function_definition" {
 		ident := node.Child(0)
 		s.Name = ident.Utf8Text(content)
+		if name == "function_definition" {
+			s.Kind = Function
+		} else if name == "definition" {
+			// Every definition is essentially a function in Faust than a variable
+			s.Kind = Function
+		}
 		//		istart := ident.StartPosition()
 		//		iend := ident.EndPosition()
 		start := node.StartPosition()
@@ -106,9 +124,8 @@ func DocumentSymbolsRecursive(node *tree_sitter.Node, content []byte) DocumentSy
 			n := node.Child(i)
 			node := DocumentSymbolsRecursive(n, content)
 			if node.Name == "environment" {
-				s.Children = append(s.Children,node.Children...)
-			}
-			if node.Name != "" { 
+				s.Children = append(s.Children, node.Children...)
+			} else if node.Name != "" {
 				s.Children = append(s.Children, node)
 			}
 		}
@@ -118,15 +135,15 @@ func DocumentSymbolsRecursive(node *tree_sitter.Node, content []byte) DocumentSy
 		s.Name = "environment"
 		//		fmt.Printf("Got %s with %s\n",name,node.Utf8Text(content))
 		if node.ChildCount() >= 2 {
-			node=node.Child(2)
+			node = node.Child(2)
 		} else {
 			return DocumentSymbol{}
 		}
-		//		fmt.Printf("Got %s with %s\n",node.GrammarName(),node.Utf8Text(content))		
+		//		fmt.Printf("Got %s with %s\n",node.GrammarName(),node.Utf8Text(content))
 		for i := uint(0); i < node.ChildCount(); i++ {
 			n := node.Child(i)
 			node := DocumentSymbolsRecursive(n, content)
-			if node.Name != "" { 
+			if node.Name != "" {
 				s.Children = append(s.Children, node)
 			}
 		}
@@ -135,7 +152,6 @@ func DocumentSymbolsRecursive(node *tree_sitter.Node, content []byte) DocumentSy
 	} else {
 		return DocumentSymbol{}
 	}
-
 
 }
 
@@ -169,9 +185,8 @@ func GetQueryMatches(queryStr string, code []byte, tree *tree_sitter.Tree) TSQue
 }
 
 func Close() {
-	tsParser.parser.Close()
+	//	tsParser.parser.Close()
 	for _, tree := range tsParser.treesToClose {
 		tree.Close()
 	}
 }
-

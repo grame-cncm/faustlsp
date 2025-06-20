@@ -25,9 +25,9 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 
 	// Don't select UTF-8, select UTF-32 and UTF-16 only
 	var positionEncoding transport.PositionEncodingKind
-	if params.Capabilities.General.PositionEncodings[0] == "utf-16"{
+	if params.Capabilities.General.PositionEncodings[0] == "utf-16" {
 		positionEncoding = transport.UTF16
-	} else if params.Capabilities.General.PositionEncodings[0] == "utf-32"{
+	} else if params.Capabilities.General.PositionEncodings[0] == "utf-32" {
 		positionEncoding = transport.UTF32
 	} else {
 		positionEncoding = transport.UTF16
@@ -36,8 +36,8 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 		Capabilities: transport.ServerCapabilities{
 			// TODO: Implement Incremental Changes for better synchronization
 			DocumentSymbolProvider: &transport.Or_ServerCapabilities_documentSymbolProvider{Value: true},
-			PositionEncoding: &positionEncoding,
-			TextDocumentSync: transport.Incremental,
+			PositionEncoding:       &positionEncoding,
+			TextDocumentSync:       transport.Incremental,
 			Workspace: &transport.WorkspaceOptions{
 				WorkspaceFolders: &transport.WorkspaceFolders5Gn{
 					Supported:           true,
@@ -48,7 +48,7 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 		ServerInfo: &transport.ServerInfo{Name: "faust-lsp", Version: "0.0.1"},
 	}
 	s.Capabilities = result.Capabilities
-	
+
 	rootPath, _ := util.Uri2path(string(params.RootURI))
 	logging.Logger.Printf("Workspace: %v\n", rootPath)
 	s.Workspace.Root = rootPath

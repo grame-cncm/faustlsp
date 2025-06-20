@@ -31,8 +31,8 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	s.Files.OpenFromURI(string(fileURI), s.Workspace.Root, true)
 
 	logging.Logger.Printf("Opening File %s\n", string(fileURI))
-	f, _:= s.Files.Get(filePath)
-	logging.Logger.Printf("Current File: %s\n",f.Content)
+	f, _ := s.Files.Get(filePath)
+	logging.Logger.Printf("Current File: %s\n", f.Content)
 
 	path, _ := util.Uri2path(string(fileURI))
 	s.Workspace.TDEvents <- TDEvent{Type: TDOpen, Path: path}
@@ -74,12 +74,12 @@ func TextDocumentChangeIncremental(ctx context.Context, s *Server, par json.RawM
 	// Apply Full TextDocumentChange
 	path, err := util.Uri2path(string(fileURI))
 	if err != nil {
-	 	return err
+		return err
 	}
 	for _, change := range params.ContentChanges {
-	 	s.Files.ModifyIncremental(path, *change.Range, change.Text)
+		s.Files.ModifyIncremental(path, *change.Range, change.Text)
 	}
-	
+
 	s.Workspace.TDEvents <- TDEvent{Type: TDChange, Path: path}
 	//	logging.Logger.Printf("Modified File %s\n", string(fileURI))
 	//	logging.Logger.Printf("Current Files: %s\n", s.Files)

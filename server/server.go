@@ -220,9 +220,9 @@ func (s *Server) HandleMethod(ctx context.Context, method string, message []byte
 
 // Map from method to method handler for request methods
 var requestHandlers = map[string]func(context.Context, *Server, interface{}, json.RawMessage) (json.RawMessage, error){
-	"initialize": Initialize,
-	"textDocument/documentSymbol": TextDocumentSymbol,	
-	"shutdown":   ShutdownEnd,
+	"initialize":                  Initialize,
+	"textDocument/documentSymbol": TextDocumentSymbol,
+	"shutdown":                    ShutdownEnd,
 }
 
 // Map from method to method handler for request methods
@@ -246,7 +246,7 @@ func TextDocumentSymbol(ctx context.Context, s *Server, id interface{}, par json
 	}
 	f, ok := s.Files.Get(path)
 	if !ok {
-		return []byte{}, fmt.Errorf("Trying to get symbols from non-exist %s\n",path)
+		return []byte{}, fmt.Errorf("Trying to get symbols from non-exist %s\n", path)
 	}
 	result := f.DocumentSymbols()
 
