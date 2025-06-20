@@ -21,7 +21,7 @@ go install
 - [ ] Diagnostics
 - [ ] Hover Documentation
 - [ ] Code Completion
-- [ ] Document Symbols
+- [x] Document Symbols
 - [ ] Formatting
 - [ ] Goto Definition
 - [ ] Find References

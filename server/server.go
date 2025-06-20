@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"faustlsp/logging"
+	"faustlsp/parser"
 	"faustlsp/transport"
 	"faustlsp/util"
 	"fmt"
@@ -56,6 +57,7 @@ type Server struct {
 func (s *Server) Init(transp transport.TransportMethod) {
 	s.Status = Created
 	s.Transport.Init(transport.Server, transp)
+	parser.Init()
 
 	// Create Temporary Directory
 	os_temp := os.TempDir()
@@ -90,6 +92,8 @@ func (s *Server) Run(ctx context.Context) error {
 		logging.Logger.Println("Canceling Main Loop")
 	}
 
+	// TODO: Have a proper cleanup function here
+	parser.Close()
 	os.RemoveAll(s.tempDir)
 	return returnError
 }
@@ -217,6 +221,7 @@ func (s *Server) HandleMethod(ctx context.Context, method string, message []byte
 // Map from method to method handler for request methods
 var requestHandlers = map[string]func(context.Context, *Server, interface{}, json.RawMessage) (json.RawMessage, error){
 	"initialize": Initialize,
+	"textDocument/documentSymbol": TextDocumentSymbol,	
 	"shutdown":   ShutdownEnd,
 }
 
@@ -228,4 +233,33 @@ var notificationHandlers = map[string]func(context.Context, *Server, json.RawMes
 	"textDocument/didClose":  TextDocumentClose,
 	// The save action of textDocument/didSave should be handled by our watcher to our store, so no need to handle
 	"exit": ExitEnd,
+}
+
+func TextDocumentSymbol(ctx context.Context, s *Server, id interface{}, par json.RawMessage) (json.RawMessage, error) {
+	var params transport.DocumentSymbolParams
+	json.Unmarshal(par, &params)
+
+	fileURI := params.TextDocument.URI
+	path, err := util.Uri2path(string(fileURI))
+	if err != nil {
+		return []byte{}, err
+	}
+	f, ok := s.Files.Get(path)
+	if !ok {
+		return []byte{}, fmt.Errorf("Trying to get symbols from non-exist %s\n",path)
+	}
+	result := f.DocumentSymbols()
+
+	resultBytes, err := json.Marshal(result)
+	//	logging.Logger.Println(string(resultBytes))
+	if err != nil {
+		return []byte{}, nil
+	}
+	var resp transport.ResponseMessage = transport.ResponseMessage{
+		Message: transport.Message{Jsonrpc: "2.0"},
+		ID:      id,
+		Result:  resultBytes,
+	}
+	msg, err := json.Marshal(resp)
+	return msg, err
 }

@@ -2,14 +2,18 @@ package server
 
 import (
 	"faustlsp/logging"
+	"faustlsp/parser"
 	"faustlsp/transport"
 	"faustlsp/util"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	//	"strings"
 	"sync"
 	"unicode/utf8"
+
+	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 type File struct {
@@ -17,6 +21,14 @@ type File struct {
 	RelPath util.Path // Path relative to a workspace
 	Content []byte
 	Open    bool
+	Tree    *tree_sitter.Tree
+	// To avoid freeing null tree in C
+	treeCreated bool
+}
+
+func (f *File) DocumentSymbols() []transport.DocumentSymbol {
+	return parser.DocumentSymbols(f.Tree, f.Content)
+	//	return []transport.DocumentSymbol{}
 }
 
 type Files struct {
@@ -68,11 +80,24 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 		}
 	}
 
+	// Parse Tree
+	var tree *tree_sitter.Tree
+	var treemade bool
+	ext := filepath.Ext(path)
+	if ext == ".dsp" || ext == ".lib" {
+		tree = parser.ParseTree(content)
+		treemade = true
+	} else {
+		treemade = false
+	}
+
 	file = File{
-		Path:    path,
-		Content: content,
-		Open:    editorOpen,
-		RelPath: relPath,
+		Path:        path,
+		Content:     content,
+		Open:        editorOpen,
+		RelPath:     relPath,
+		Tree:        tree,
+		treeCreated: treemade,
 	}
 
 	files.mu.Lock()
@@ -94,7 +119,17 @@ func (files *Files) ModifyFull(path util.Path, content string) {
 		logging.Logger.Printf("error: file to modify not in file store (%s)\n", path)
 		return
 	}
+
 	f.Content = []byte(content)
+
+	ext := filepath.Ext(path)
+	if ext == ".dsp" || ext == ".lib" {
+		if f.treeCreated {
+			f.Tree.Close()
+		}
+		f.Tree = parser.ParseTree(f.Content)
+		f.treeCreated = true
+	}
 	files.mu.Unlock()
 }
 
@@ -110,9 +145,19 @@ func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Rang
 	result := ApplyIncrementalChange(changeRange, content, string(f.Content), string(files.encoding))
 	//	logging.Logger.Printf("Before:\n%s\nAfter:\n%s\n", string(f.Content), result)
 	f.Content = []byte(result)
+
+	ext := filepath.Ext(path)
+	if ext == ".dsp" || ext == ".lib" {
+		if f.treeCreated {
+			f.Tree.Close()
+		}
+		f.Tree = parser.ParseTree(f.Content)
+		f.treeCreated = true
+	}
 	files.mu.Unlock()
 }
 
+// TODO: Maybe have the 3 following functions in util instead of here
 func ApplyIncrementalChange(r transport.Range, newContent string, content string, encoding string) string {
 	start, _ := PositionToOffset(r.Start, content, encoding)
 	end, _ := PositionToOffset(r.End, content, encoding)
@@ -191,6 +236,16 @@ func (files *Files) Close(path util.Path) {
 
 func (files *Files) Remove(path util.Path) {
 	files.mu.Lock()
+	// TODO: Have a close function for File
+	f, ok := files.fs[path]
+	if ok {
+		ext := filepath.Ext(path)
+		if ext == ".dsp" || ext == ".lib" {
+			if f.treeCreated {
+				f.Tree.Close()
+			}
+		}
+	}
 	delete(files.fs, path)
 	files.mu.Unlock()
 }

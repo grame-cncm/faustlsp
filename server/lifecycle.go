@@ -35,6 +35,7 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 	var result transport.InitializeResult = transport.InitializeResult{
 		Capabilities: transport.ServerCapabilities{
 			// TODO: Implement Incremental Changes for better synchronization
+			DocumentSymbolProvider: &transport.Or_ServerCapabilities_documentSymbolProvider{Value: true},
 			PositionEncoding: &positionEncoding,
 			TextDocumentSync: transport.Incremental,
 			Workspace: &transport.WorkspaceOptions{
@@ -47,7 +48,7 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 		ServerInfo: &transport.ServerInfo{Name: "faust-lsp", Version: "0.0.1"},
 	}
 	s.Capabilities = result.Capabilities
-
+	
 	rootPath, _ := util.Uri2path(string(params.RootURI))
 	logging.Logger.Printf("Workspace: %v\n", rootPath)
 	s.Workspace.Root = rootPath
