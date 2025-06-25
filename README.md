@@ -18,7 +18,7 @@ go install
 
 - [x] Document Synchronization
 - [x] Workspace Replication
-- [ ] Diagnostics
+- [x] Diagnostics (Syntax errors)
 - [ ] Hover Documentation
 - [ ] Code Completion
 - [x] Document Symbols

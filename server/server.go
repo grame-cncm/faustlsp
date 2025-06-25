@@ -51,6 +51,9 @@ type Server struct {
 
 	// Temporary Directory where we replicate workspace for diagnostics
 	tempDir util.Path
+
+	// Diagnostic Channel
+	diagChan chan transport.PublishDiagnosticsParams
 }
 
 // Initialize Server

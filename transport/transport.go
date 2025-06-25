@@ -107,7 +107,7 @@ func (t *Transport) WriteNotif(method string, params json.RawMessage) error {
 		return err
 	}
 
-	_, err = t.Writer.Write(msg)
+	err = t.Write(msg)
 	return err
 }
 
@@ -125,7 +125,7 @@ func (t *Transport) WriteRequest(id interface{}, method string, params json.RawM
 	}
 
 	logging.Logger.Println("Writing " + string(msg))
-	_, err = t.Writer.Write(msg)
+	err = t.Write(msg)
 	return err
 }
 

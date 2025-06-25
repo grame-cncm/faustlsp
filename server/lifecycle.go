@@ -11,7 +11,7 @@ import (
 )
 
 // Initialize Handler
-func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMessage) (json.RawMessage, error) {
+func Initialize(ctx context.Context, s *Server, id any, par json.RawMessage) (json.RawMessage, error) {
 	// TODO: Error Handling
 
 	s.Status = Initializing
@@ -68,10 +68,13 @@ func Initialize(ctx context.Context, s *Server, id interface{}, par json.RawMess
 
 // Initialized Handler
 func Initialized(ctx context.Context, s *Server, par json.RawMessage) error {
-	logging.Logger.Println("Handling Initialized")
+
 	s.Status = Running
-	s.Files.Init(*s.Capabilities.PositionEncoding)
+	go s.GenerateDiagnostics()
+	s.Files.Init(ctx, *s.Capabilities.PositionEncoding)
 	s.Workspace.Init(ctx, s)
+	logging.Logger.Println("Handling Initialized with diagnostics")
+	logging.Logger.Println("Started Diagnostic Handler")
 	// Send WorkspaceFolders Request
 	// TODO: Do this only if server-client agreed on workspacefolders
 	//	err := s.Transport.WriteRequest(s.reqIdCtr,"workspace/workspaceFolders", []byte{})
@@ -83,7 +86,7 @@ func Initialized(ctx context.Context, s *Server, par json.RawMessage) error {
 }
 
 // Shutdown Handler
-func ShutdownEnd(ctx context.Context, s *Server, id interface{}, par json.RawMessage) (json.RawMessage, error) {
+func ShutdownEnd(ctx context.Context, s *Server, id any, par json.RawMessage) (json.RawMessage, error) {
 	s.Status = Shutdown
 	var result = transport.ResponseMessage{
 		Message: transport.Message{Jsonrpc: "2.0"},

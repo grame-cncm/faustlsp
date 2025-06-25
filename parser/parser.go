@@ -2,6 +2,7 @@ package parser
 
 import (
 	. "faustlsp/transport"
+	"fmt"
 	"sync"
 
 	tree_sitter_faust "github.com/khiner/tree-sitter-faust/bindings/go"
@@ -41,6 +42,32 @@ func ParseTree(code []byte) *tree_sitter.Tree {
 	tsParser.parser.Reset()
 	tsParser.mu.Unlock()
 	return tree
+}
+
+func TSDiagnostics(code []byte, tree *tree_sitter.Tree) []Diagnostic {
+	errorQuery := "(ERROR) @error\n(MISSING) @missing"
+	rslts := GetQueryMatches(errorQuery, code, tree)
+
+	var diagnostics = []Diagnostic{}
+	for _, errors := range rslts.results {
+		for _, node := range errors {
+			start := node.StartPosition()
+			end := node.EndPosition()
+			d := Diagnostic{
+				Range: Range{
+					Start: Position{Line: uint32(start.Row),
+						Character: uint32(start.Column)},
+					End: Position{Line: uint32(end.Row),
+						Character: uint32(end.Column)},
+				},
+				Message: fmt.Sprintf("Error parsing at line %d, char %d\n", start.Row, start.Column),
+				Severity: DiagnosticSeverity(Error),
+				Source: "tree-sitter",
+			}
+			diagnostics = append(diagnostics, d)
+		}
+	}
+	return diagnostics
 }
 
 func DocumentSymbols(tree *tree_sitter.Tree, content []byte) []DocumentSymbol {

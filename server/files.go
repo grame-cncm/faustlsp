@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"faustlsp/logging"
 	"faustlsp/parser"
 	"faustlsp/transport"
@@ -32,6 +33,15 @@ func (f *File) DocumentSymbols() []transport.DocumentSymbol {
 	//	return []transport.DocumentSymbol{}
 }
 
+func (f *File) Diagnostics() transport.PublishDiagnosticsParams {
+	errors := parser.TSDiagnostics(f.Content, f.Tree)
+	d := transport.PublishDiagnosticsParams{
+		URI:         transport.DocumentURI(f.URI),
+		Diagnostics: errors,
+	}
+	return d
+}
+
 type Files struct {
 	// Absolute Paths Only
 	fs       map[util.Path]*File
@@ -39,7 +49,7 @@ type Files struct {
 	encoding transport.PositionEncodingKind // Position Encoding for applying incremental changes. UTF-16 and UTF-32 supported
 }
 
-func (files *Files) Init(encoding transport.PositionEncodingKind) {
+func (files *Files) Init(context context.Context, encoding transport.PositionEncodingKind) {
 	files.fs = make(map[string]*File)
 	files.encoding = encoding
 }
@@ -93,6 +103,9 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 		treemade = false
 	}
 
+	if uri == "" {
+		uri = util.Path2URI(path)
+	}
 	file = File{
 		Path:        path,
 		Content:     content,
@@ -100,7 +113,7 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 		RelPath:     relPath,
 		Tree:        tree,
 		treeCreated: treemade,
-		URI: uri,
+		URI:         uri,
 	}
 
 	files.mu.Lock()
