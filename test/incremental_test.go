@@ -29,7 +29,7 @@ func TestGetLines(t *testing.T){
 
 func TestPositionToOffset(t *testing.T){
 	testStr:= "abcd\nef😆abc\nasd😆\n45"
-	offset, _ := server.PositionToOffset(transport.Position{0, 4}, testStr)
+	offset, _ := server.PositionToOffset(transport.Position{0, 4}, testStr, "utf-16")
 	offset=offset
 	v, _ := utf8.DecodeRuneInString(testStr[offset:])
 	fmt.Printf("At %d is [%d]%c\n", offset, v, v)

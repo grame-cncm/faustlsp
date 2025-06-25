@@ -1,7 +1,12 @@
 package util
 
 import (
+	"faustlsp/logging"
 	"net/url"
+	"path/filepath"
+	"runtime"
+
+	"strings"
 	"unicode"
 )
 
@@ -14,13 +19,33 @@ func Uri2path(uri string) (string, error) {
 		return "", err
 	}
 	//	url.Path
-	return url.Path, nil
+	if IsWindowsDriveURIPath(url.Path) {
+		logging.Logger.Printf("Path %s is windows", url.Path)
+		url.Path = strings.ToUpper(string(url.Path[1])) + url.Path[2:]
+	} else {
+		logging.Logger.Printf("Path %s is not windows", url.Path)
+	}
+	return filepath.FromSlash(url.Path), nil
 }
 
-func IsWindowsPath(path string) bool {
+func Path2URI(path string) Uri {
+	scheme := "file://"
+	if runtime.GOOS == "windows" {
+		path = "/" + strings.Replace(path, "\\", "/", -1)
+	}
+	return scheme + path
+}
+
+func IsWindowsDriveURIPath(uri string) bool {
+	if len(uri) < 4 {
+		return false
+	}
+	return uri[0] == '/' && unicode.IsLetter(rune(uri[1])) && uri[2] == ':'
+}
+
+func IsWindowsDrivePath(path string) bool {
 	if len(path) < 3 {
 		return false
 	}
 	return unicode.IsLetter(rune(path[0])) && path[1] == ':'
-
 }

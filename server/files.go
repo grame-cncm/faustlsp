@@ -17,6 +17,7 @@ import (
 )
 
 type File struct {
+	URI     util.Uri
 	Path    util.Path
 	RelPath util.Path // Path relative to a workspace
 	Content []byte
@@ -49,10 +50,10 @@ func (files *Files) OpenFromURI(uri util.Uri, root util.Path, editorOpen bool) {
 		logging.Logger.Println(err)
 		return
 	}
-	files.OpenFromPath(path, root, editorOpen)
+	files.OpenFromPath(path, root, editorOpen, uri)
 }
 
-func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool) {
+func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool, uri util.Uri) {
 	var file File
 
 	var relPath util.Path
@@ -99,6 +100,7 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 		RelPath:     relPath,
 		Tree:        tree,
 		treeCreated: treemade,
+		URI: uri,
 	}
 
 	files.mu.Lock()
