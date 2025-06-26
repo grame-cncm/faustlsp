@@ -51,8 +51,29 @@ func TSDiagnostics(code []byte, tree *tree_sitter.Tree) []Diagnostic {
 	var diagnostics = []Diagnostic{}
 	for _, errors := range rslts.results {
 		for _, node := range errors {
+			// First named parent node from error
+			prev := node.Parent()
+			if prev.GrammarName() == "ERROR" {
+				continue
+			}
+			for {
+				if !prev.IsNamed() {
+					prev = prev.Parent()
+				} else {
+					break
+				}
+			}
 			start := node.StartPosition()
 			end := node.EndPosition()
+
+			var msg string
+			if node.Kind() != "ERROR" {
+				msg = fmt.Sprintf("Missing '%s' at %d:%d\n", node.GrammarName(), start.Row, start.Column)
+			} else {
+				msg = fmt.Sprintf("Syntax Error: Unexpected '%s' at %d:%d when parsing inside %s\n", node.Utf8Text(code), start.Row, start.Column, prev.GrammarName())
+
+			}
+
 			d := Diagnostic{
 				Range: Range{
 					Start: Position{Line: uint32(start.Row),
@@ -60,9 +81,9 @@ func TSDiagnostics(code []byte, tree *tree_sitter.Tree) []Diagnostic {
 					End: Position{Line: uint32(end.Row),
 						Character: uint32(end.Column)},
 				},
-				Message: fmt.Sprintf("Error parsing at line %d, char %d\n", start.Row, start.Column),
+				Message:  msg,
 				Severity: DiagnosticSeverity(Error),
-				Source: "tree-sitter",
+				Source:   "tree-sitter",
 			}
 			diagnostics = append(diagnostics, d)
 		}
