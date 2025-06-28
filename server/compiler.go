@@ -62,16 +62,22 @@ func getCompilerDiagnostics(path string) transport.Diagnostic{
 	case FileError:
 		error := parseFileError(errors.String())
 		logging.Logger.Println(error)
+		if error.Line > 0 {
+			error.Line-=1
+		}
+		if error.Line == -1{
+			error.Line =0
+		}
 		return transport.Diagnostic{
 			Range: transport.Range{
 				Start: transport.Position{
 					// Lines must be zero-indexed
-					Line: uint32(error.Line)-1,
+					Line: uint32(error.Line),
 					Character: 0,
 				},
 				End: transport.Position{
-					Line: uint32(error.Line)-1,
-					// Bound of 32 bit unsigned integer for selecting the whole line
+					Line: uint32(error.Line),
+					// TODO: Actually calculate end of line
 					Character: 2147483647,
 				},
 			},
