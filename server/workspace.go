@@ -30,15 +30,30 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 	// Open all files in workspace and add to File Store
 	workspace.Files = make(map[util.Path]*File)
 	workspace.TDEvents = make(chan TDEvent)
-	err := filepath.Walk(workspace.Root, func(path string, info os.FileInfo, err error) error {
+
+	// Replicate Workspace in our Temp Dir by copying
+	logging.Logger.Printf("Current workspace root path: %s\n", workspace.Root)
+	folder := filepath.Base(workspace.Root)
+	tempWorkspacePath := filepath.Join(s.tempDir, folder)
+	err := cp.Copy(workspace.Root, tempWorkspacePath)
+	if err != nil {
+		logging.Logger.Printf("Error in copying file: %s\n", err)
+	}
+	logging.Logger.Printf("Replicating Workspace in %s\n", tempWorkspacePath)
+	
+	err = filepath.Walk(workspace.Root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() {
 			_, ok := s.Files.Get(path)
+			// Path relative to workspace
+			relPath := path[len(workspace.Root)+1:]
+			workspaceFolderName := filepath.Base(workspace.Root)
+			tempDirFilePath := filepath.Join(s.tempDir, workspaceFolderName, relPath)
 			if !ok {
 				logging.Logger.Printf("Opening file from workspace: %s\n", path)
-				s.Files.OpenFromPath(path, workspace.Root, false, "")
+				s.Files.OpenFromPath(path, workspace.Root, false, "", tempDirFilePath)
 				workspace.addFileFromFileStore(path, s)
 			}
 		}
@@ -48,15 +63,7 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 	logging.Logger.Printf("Workspace Files: %v\n", workspace.Files)
 	logging.Logger.Printf("File Store: %s\n", s.Files.String())
 
-	// Replicate Workspace in our Temp Dir by copying
-	logging.Logger.Printf("Current workspace root path: %s\n", workspace.Root)
-	folder := filepath.Base(workspace.Root)
-	tempWorkspacePath := filepath.Join(s.tempDir, folder)
-	err = cp.Copy(workspace.Root, tempWorkspacePath)
-	if err != nil {
-		logging.Logger.Printf("Error in copying file: %s\n", err)
-	}
-	logging.Logger.Printf("Replicating Workspace in %s\n", tempWorkspacePath)
+
 
 	go func(){workspace.StartTrackingChanges(ctx, s)}()
 	logging.Logger.Printf("Started workspace watcher\n")
@@ -78,7 +85,7 @@ func (workspace *Workspace) StartTrackingChanges(ctx context.Context, s *Server)
 	if err != nil {
 		logging.Logger.Fatal(err)
 	}
-
+	
 	// Recursively add directories to watchlist
 	err = filepath.Walk(workspace.Root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -166,8 +173,8 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 				watcher.Add(origPath)
 			} else {
 				// Add it our server tracking and workspace
-				s.Files.OpenFromPath(origPath, s.Workspace.Root, false, "")
-				workspace.addFileFromFileStore(origPath, s)
+				s.Files.OpenFromPath(origPath, s.Workspace.Root, false, "", tempDirFilePath)
+
 
 				// Create File
 				f, err := os.Create(tempDirFilePath)
@@ -176,6 +183,8 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 				}
 				f.Chmod(fi.Mode())
 				f.Close()
+
+				workspace.addFileFromFileStore(origPath, s)
 			}
 		} else {
 			// Rename Create
@@ -254,13 +263,14 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 	case TDClose:
 		// Sync file from disk on close if it exists and replicate it to temporary directory, else remove from Files Store
 		if util.IsValidPath(origFilePath) { // Check if the file path is valid
-			s.Files.OpenFromPath(origFilePath, s.Workspace.Root, false, "") // Reload the file from the specified path.
-			workspace.addFileFromFileStore(origFilePath, s)
+			s.Files.OpenFromPath(origFilePath, s.Workspace.Root, false, "", tempDirFilePath) // Reload the file from the specified path.
+
 
 			file, ok := s.Files.Get(origFilePath) // Retrieve the file again (unnecessary, can use the previous `file`)
 			if ok {
 				os.WriteFile(tempDirFilePath, file.Content, os.FileMode(os.O_TRUNC)) // Write content to temporary file, replicating it from disk.
 			}
+			workspace.addFileFromFileStore(origFilePath, s)
 		} else {
 			s.Files.Remove(origFilePath) // Remove the file from the file store if the path isn't valid
 		}

@@ -21,6 +21,7 @@ type File struct {
 	URI     util.Uri
 	Path    util.Path
 	RelPath util.Path // Path relative to a workspace
+	TempPath util.Path // Path for temporary	
 	Content []byte
 	Open    bool
 	Tree    *tree_sitter.Tree
@@ -35,6 +36,14 @@ func (f *File) DocumentSymbols() []transport.DocumentSymbol {
 
 func (f *File) Diagnostics() transport.PublishDiagnosticsParams {
 	errors := parser.TSDiagnostics(f.Content, f.Tree)
+	if len(errors) == 0 {
+		compDiagnostics := getCompilerDiagnostics(f.TempPath)
+		logging.Logger.Printf("Temp Path %s\n", f.TempPath)
+		logging.Logger.Printf("Got %+v as compiler diagnostic\n", compDiagnostics)
+		if compDiagnostics.Message != "" {
+			errors = []transport.Diagnostic{getCompilerDiagnostics(f.TempPath)}
+		}
+	}
 	d := transport.PublishDiagnosticsParams{
 		URI:         transport.DocumentURI(f.URI),
 		Diagnostics: errors,
@@ -54,16 +63,16 @@ func (files *Files) Init(context context.Context, encoding transport.PositionEnc
 	files.encoding = encoding
 }
 
-func (files *Files) OpenFromURI(uri util.Uri, root util.Path, editorOpen bool) {
+func (files *Files) OpenFromURI(uri util.Uri, root util.Path, editorOpen bool, temp util.Path) {
 	path, err := util.Uri2path(uri)
 	if err != nil {
 		logging.Logger.Println(err)
 		return
 	}
-	files.OpenFromPath(path, root, editorOpen, uri)
+	files.OpenFromPath(path, root, editorOpen, uri, temp)
 }
 
-func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool, uri util.Uri) {
+func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool, uri util.Uri, temp util.Path) {
 	var file File
 
 	var relPath util.Path
@@ -112,6 +121,7 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 		Open:        editorOpen,
 		RelPath:     relPath,
 		Tree:        tree,
+		TempPath: temp,
 		treeCreated: treemade,
 		URI:         uri,
 	}

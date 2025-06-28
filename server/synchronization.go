@@ -6,6 +6,7 @@ import (
 	"faustlsp/logging"
 	"faustlsp/transport"
 	"faustlsp/util"
+	"path/filepath"
 )
 
 type TDChangeType int
@@ -26,15 +27,20 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	json.Unmarshal(par, &params)
 
 	fileURI := params.TextDocument.URI
-	filePath, _ := util.Uri2path(string(fileURI))
+	path, _ := util.Uri2path(string(fileURI))
 	// Open File
-	s.Files.OpenFromURI(string(fileURI), s.Workspace.Root, true)
+	// Path relative to workspace
+	relPath := path[len(s.Workspace.Root)+1:]
+	workspaceFolderName := filepath.Base(s.Workspace.Root)
+	tempDirFilePath := filepath.Join(s.tempDir, workspaceFolderName, relPath)
+
+	s.Files.OpenFromURI(string(fileURI), s.Workspace.Root, true, tempDirFilePath)
 
 	logging.Logger.Printf("Opening File %s\n", string(fileURI))
-	f, _ := s.Files.Get(filePath)
+	f, _ := s.Files.Get(path)
 	logging.Logger.Printf("Current File: %s\n", f.Content)
 
-	path, _ := util.Uri2path(string(fileURI))
+
 	s.Workspace.TDEvents <- TDEvent{Type: TDOpen, Path: path}
 	return nil
 }
