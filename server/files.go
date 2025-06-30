@@ -49,26 +49,6 @@ func (f *File) TSDiagnostics() transport.PublishDiagnosticsParams {
 	return d
 }
 
-func (f *File) Diagnostics() transport.PublishDiagnosticsParams {
-	errors := parser.TSDiagnostics(f.Content, f.Tree)
-	if len(errors) == 0 {
-		//		compDiagnostics := getCompilerDiagnostics(f.TempPath, "")
-		//		logging.Logger.Printf("Temp Path %s\n", f.TempPath)
-		//		logging.Logger.Printf("Got %+v as compiler diagnostic\n", compDiagnostics)
-		//		if compDiagnostics.Message != "" {
-		//			errors = []transport.Diagnostic{compDiagnostics}
-		//		}
-		f.hasSyntaxErrors = false
-	} else {
-		f.hasSyntaxErrors = true
-	}
-	d := transport.PublishDiagnosticsParams{
-		URI:         transport.DocumentURI(f.URI),
-		Diagnostics: errors,
-	}
-	return d
-}
-
 type Files struct {
 	// Absolute Paths Only
 	fs       map[util.Path]*File

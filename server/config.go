@@ -14,6 +14,7 @@ type FaustProjectConfig struct {
 	ProcessName  string      `json:"process_name,omitempty"`
 	ProcessFiles []util.Path `json:"process_files,omitempty"`
 	IncludeDir   []util.Path `json:"include,omitempty"`
+	CompilerDiagnostics bool `json:"compiler_diagnostics,omitempty"`
 }
 
 // Ideal behavior of config file
@@ -53,19 +54,26 @@ func (w *Workspace) sendCompilerDiagnostics(s *Server) {
 	}
 }
 
+func (c *FaustProjectConfig) UnmarshalJSON(content []byte) error{
+	type Config FaustProjectConfig
+	var cfg = Config{
+		Command: "faust",
+		ProcessName: "process",
+		CompilerDiagnostics: true,
+	}
+	if err := json.Unmarshal(content, &cfg); err != nil {
+		return err
+	}
+	*c = FaustProjectConfig(cfg)
+	return nil
+}
+
 func (w *Workspace) parseConfig(content []byte) (FaustProjectConfig, error) {
 	var config FaustProjectConfig
 	err := json.Unmarshal(content, &config)
 	if err != nil {
 		logging.Logger.Printf("Invalid Project Config file: %s\n", err)
 		return FaustProjectConfig{}, err
-	}
-	// Defaults populating
-	if len(config.Command) == 0 {
-		config.Command = "faust"
-	}
-	if len(config.ProcessName) == 0 {
-		config.ProcessName = "process"
 	}
 	// If no process files provided, all .dsp files become process
 	if len(config.ProcessFiles) == 0 {
@@ -80,6 +88,7 @@ func (w *Workspace) defaultConfig() FaustProjectConfig {
 		Command:      "faust",
 		Type:         "process",
 		ProcessFiles: w.getFaustDSPRelativePaths(),
+		CompilerDiagnostics: true,
 	}
 	return config
 }

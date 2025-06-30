@@ -69,6 +69,7 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 				logging.Logger.Printf("Opening file from workspace: %s\n", path)
 				s.Files.OpenFromPath(path, workspace.Root, false, "", tempDirFilePath)
 				workspace.addFileFromFileStore(path, s)
+				workspace.DiagnoseFile(path, s)
 			}
 		}
 		return nil
@@ -321,12 +322,7 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 }
 
 func (workspace *Workspace) addFileFromFileStore(path util.Path, s *Server) {
-	file, ok := s.Files.Get(path)
-	if ok && IsFaustFile(path) {
-		logging.Logger.Printf("Sending Diagnostic")
-		s.diagChan <- file.Diagnostics()
-		logging.Logger.Printf("Sent Diagnostic")
-	}
+	file, _ := s.Files.Get(path)
 	workspace.mu.Lock()
 	workspace.Files[path] = file
 	workspace.mu.Unlock()
@@ -336,10 +332,12 @@ func (w *Workspace) DiagnoseFile(path util.Path, s *Server) {
 	if IsFaustFile(path) {
 		f, ok := s.Files.Get(path)
 		if ok {
-			s.diagChan <- f.Diagnostics()
+			s.diagChan <- f.TSDiagnostics()
 		}
 		// Compiler Diagnostics if exists
-		w.sendCompilerDiagnostics(s)
+		if w.config.CompilerDiagnostics {
+			w.sendCompilerDiagnostics(s)
+		}
 	}
 }
 
