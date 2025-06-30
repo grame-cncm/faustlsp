@@ -45,8 +45,8 @@ func getFaustErrorReportingType(s string) FaustErrorReportingType {
 }
 
 // TODO: When handling initialize, send diagnostics capability based on whether PATH has faust or some other compiler path provided by project configuration
-func getCompilerDiagnostics(path string, dirPath string) transport.Diagnostic {
-	cmd := exec.Command("faust", path)
+func getCompilerDiagnostics(path string, dirPath string, cfg FaustProjectConfig) transport.Diagnostic {
+	cmd := exec.Command(cfg.Command, path, "-pn", cfg.ProcessName)
 	if dirPath != "" {
 		cmd.Dir = dirPath
 	}

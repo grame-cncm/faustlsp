@@ -42,7 +42,7 @@ func (w *Workspace) sendCompilerDiagnostics(s *Server) {
 		if ok {
 			if !f.hasSyntaxErrors {
 				uri := util.Path2URI(path)
-				diagnosticErrors := getCompilerDiagnostics(filePath, w.Root)
+				diagnosticErrors := getCompilerDiagnostics(filePath, w.Root, w.config)
 				d := transport.PublishDiagnosticsParams{
 					URI:         transport.DocumentURI(uri),
 					Diagnostics: []transport.Diagnostic{diagnosticErrors},
