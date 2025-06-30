@@ -11,21 +11,22 @@ import (
 )
 
 type FaustError struct {
-	File string
-	Line int
+	File    string
+	Line    int
 	Message string
 }
 
 type FaustErrorReportingType uint
+
 const (
 	FileError = iota
 	Error
 	NullError
 )
 
-var FaustErrorName = map[FaustErrorReportingType] string {
+var FaustErrorName = map[FaustErrorReportingType]string{
 	FileError: "File Error",
-	Error: "Error",
+	Error:     "Error",
 	NullError: "Unrecognized Error",
 }
 
@@ -33,9 +34,9 @@ func (fe FaustErrorReportingType) String() string {
 	return FaustErrorName[fe]
 }
 
-func getFaustErrorReportingType(s string) FaustErrorReportingType{
-	if len(s) < 5{
-		return NullError	
+func getFaustErrorReportingType(s string) FaustErrorReportingType {
+	if len(s) < 5 {
+		return NullError
 	}
 	if s[:5] == "ERROR" {
 		return Error
@@ -43,11 +44,12 @@ func getFaustErrorReportingType(s string) FaustErrorReportingType{
 	return FileError
 }
 
-
-
 // TODO: When handling initialize, send diagnostics capability based on whether PATH has faust or some other compiler path provided by project configuration
-func getCompilerDiagnostics(path string) transport.Diagnostic{
+func getCompilerDiagnostics(path string, dirPath string) transport.Diagnostic {
 	cmd := exec.Command("faust", path)
+	if dirPath != "" {
+		cmd.Dir = dirPath
+	}
 	var errors strings.Builder
 	cmd.Stderr = &errors
 	err := cmd.Run()
@@ -57,22 +59,22 @@ func getCompilerDiagnostics(path string) transport.Diagnostic{
 	}
 
 	errorType := getFaustErrorReportingType(faustErrors)
-	
+
 	switch errorType {
 	case FileError:
 		error := parseFileError(errors.String())
 		logging.Logger.Println(error)
 		if error.Line > 0 {
-			error.Line-=1
+			error.Line -= 1
 		}
-		if error.Line == -1{
-			error.Line =0
+		if error.Line == -1 {
+			error.Line = 0
 		}
 		return transport.Diagnostic{
 			Range: transport.Range{
 				Start: transport.Position{
 					// Lines must be zero-indexed
-					Line: uint32(error.Line),
+					Line:      uint32(error.Line),
 					Character: 0,
 				},
 				End: transport.Position{
@@ -81,19 +83,18 @@ func getCompilerDiagnostics(path string) transport.Diagnostic{
 					Character: 2147483647,
 				},
 			},
-			Message: error.Message,
+			Message:  error.Message,
 			Severity: transport.DiagnosticSeverity(transport.Error),
-			Source: "faust",
+			Source:   "faust",
 		}
 	case Error:
 		error := parseError(errors.String())
 		logging.Logger.Printf("%+v\n", parseError(errors.String()))
 		return transport.Diagnostic{
-			Range: transport.Range{},
-			Message: error.Message,
+			Range:    transport.Range{},
+			Message:  error.Message,
 			Severity: transport.DiagnosticSeverity(transport.Error),
-			Source: "faust",
-			
+			Source:   "faust",
 		}
 	case NullError:
 		logging.Logger.Printf("Unrecognized Error\n")
@@ -103,23 +104,21 @@ func getCompilerDiagnostics(path string) transport.Diagnostic{
 	}
 }
 
-
-func parseFileError(s string) FaustError{
+func parseFileError(s string) FaustError {
 	re := regexp.MustCompile(`(?s)(.+):([-\d]+)\s:\sERROR\s:\s(.*)`)
 	captures := re.FindStringSubmatch(s)
-	if len(captures) < 4{
+	if len(captures) < 4 {
 		panic(fmt.Errorf("Expected 4 values in %+v\n", captures))
 	}
 	line, _ := strconv.Atoi(captures[2])
 	return FaustError{File: captures[1], Line: line, Message: captures[3]}
 }
 
-func parseError(s string) FaustError{
+func parseError(s string) FaustError {
 	re := regexp.MustCompile(`(?s)ERROR\s:\s(.*)`)
 	captures := re.FindStringSubmatch(s)
-	if len(captures) < 2{
+	if len(captures) < 2 {
 		panic(fmt.Errorf("Expected 2 values in %+v\n", captures))
 	}
 	return FaustError{Message: captures[1]}
 }
-

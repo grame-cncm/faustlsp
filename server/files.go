@@ -18,15 +18,16 @@ import (
 )
 
 type File struct {
-	URI     util.Uri
-	Path    util.Path
-	RelPath util.Path // Path relative to a workspace
-	TempPath util.Path // Path for temporary	
-	Content []byte
-	Open    bool
-	Tree    *tree_sitter.Tree
+	URI      util.Uri
+	Path     util.Path
+	RelPath  util.Path // Path relative to a workspace
+	TempPath util.Path // Path for temporary
+	Content  []byte
+	Open     bool
+	Tree     *tree_sitter.Tree
 	// To avoid freeing null tree in C
-	treeCreated bool
+	treeCreated     bool
+	hasSyntaxErrors bool
 }
 
 func (f *File) DocumentSymbols() []transport.DocumentSymbol {
@@ -34,15 +35,32 @@ func (f *File) DocumentSymbols() []transport.DocumentSymbol {
 	//	return []transport.DocumentSymbol{}
 }
 
+func (f *File) TSDiagnostics() transport.PublishDiagnosticsParams {
+	errors := parser.TSDiagnostics(f.Content, f.Tree)
+	if len(errors) == 0 {
+		f.hasSyntaxErrors = false
+	} else {
+		f.hasSyntaxErrors = true
+	}
+	d := transport.PublishDiagnosticsParams{
+		URI:         transport.DocumentURI(f.URI),
+		Diagnostics: errors,
+	}
+	return d
+}
+
 func (f *File) Diagnostics() transport.PublishDiagnosticsParams {
 	errors := parser.TSDiagnostics(f.Content, f.Tree)
 	if len(errors) == 0 {
-		compDiagnostics := getCompilerDiagnostics(f.TempPath)
-		logging.Logger.Printf("Temp Path %s\n", f.TempPath)
-		logging.Logger.Printf("Got %+v as compiler diagnostic\n", compDiagnostics)
-		if compDiagnostics.Message != "" {
-			errors = []transport.Diagnostic{getCompilerDiagnostics(f.TempPath)}
-		}
+		//		compDiagnostics := getCompilerDiagnostics(f.TempPath, "")
+		//		logging.Logger.Printf("Temp Path %s\n", f.TempPath)
+		//		logging.Logger.Printf("Got %+v as compiler diagnostic\n", compDiagnostics)
+		//		if compDiagnostics.Message != "" {
+		//			errors = []transport.Diagnostic{compDiagnostics}
+		//		}
+		f.hasSyntaxErrors = false
+	} else {
+		f.hasSyntaxErrors = true
 	}
 	d := transport.PublishDiagnosticsParams{
 		URI:         transport.DocumentURI(f.URI),
@@ -121,7 +139,7 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 		Open:        editorOpen,
 		RelPath:     relPath,
 		Tree:        tree,
-		TempPath: temp,
+		TempPath:    temp,
 		treeCreated: treemade,
 		URI:         uri,
 	}

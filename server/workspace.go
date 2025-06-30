@@ -13,17 +13,30 @@ import (
 	cp "github.com/otiai10/copy"
 )
 
+const faustConfigFile = ".faustcfg.json"
+
 type Workspace struct {
 	// Path to Root Directory of Workspace
 	Root     string
 	Files    map[util.Path]*File
 	mu       sync.Mutex
 	TDEvents chan TDEvent
+	config   FaustProjectConfig
 }
 
 func IsFaustFile(path util.Path) bool {
 	ext := filepath.Ext(path)
 	return ext == ".dsp" || ext == ".lib"
+}
+
+func IsDSPFile(path util.Path) bool {
+	ext := filepath.Ext(path)
+	return ext == ".dsp"
+}
+
+func IsLibFile(path util.Path) bool {
+	ext := filepath.Ext(path)
+	return ext == ".lib"
 }
 
 func (workspace *Workspace) Init(ctx context.Context, s *Server) {
@@ -40,7 +53,8 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 		logging.Logger.Printf("Error in copying file: %s\n", err)
 	}
 	logging.Logger.Printf("Replicating Workspace in %s\n", tempWorkspacePath)
-	
+
+	// Open the files in file store
 	err = filepath.Walk(workspace.Root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -60,13 +74,30 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 		return nil
 	})
 
+	// Parse Config File
+	workspace.loadConfigFiles(s)
+
 	logging.Logger.Printf("Workspace Files: %v\n", workspace.Files)
 	logging.Logger.Printf("File Store: %s\n", s.Files.String())
 
-
-
-	go func(){workspace.StartTrackingChanges(ctx, s)}()
+	go func() { workspace.StartTrackingChanges(ctx, s) }()
 	logging.Logger.Printf("Started workspace watcher\n")
+}
+
+func (workspace *Workspace) loadConfigFiles(s *Server) {
+	f, ok := s.Files.Get(filepath.Join(workspace.Root, faustConfigFile))
+	var cfg FaustProjectConfig
+	var err error
+	if ok {
+		cfg, err = workspace.parseConfig(f.Content)
+		if err != nil {
+			cfg = workspace.defaultConfig()
+		}
+	} else {
+		cfg = workspace.defaultConfig()
+	}
+	workspace.config = cfg
+	logging.Logger.Printf("Config File: %+v\n", cfg)
 }
 
 // Track and Replicate Changes to workspace
@@ -85,7 +116,7 @@ func (workspace *Workspace) StartTrackingChanges(ctx context.Context, s *Server)
 	if err != nil {
 		logging.Logger.Fatal(err)
 	}
-	
+
 	// Recursively add directories to watchlist
 	err = filepath.Walk(workspace.Root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -147,6 +178,13 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 
 	// Path relative to workspace
 	relPath := origPath[len(workspace.Root)+1:]
+
+	// Reload config file if changed
+	if filepath.Base(relPath) == faustConfigFile {
+		workspace.loadConfigFiles(s)
+		workspace.cleanDiagnostics(s)
+	}
+
 	// Workspace Folder name
 	workspaceFolderName := filepath.Base(workspace.Root)
 
@@ -174,7 +212,6 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 			} else {
 				// Add it our server tracking and workspace
 				s.Files.OpenFromPath(origPath, s.Workspace.Root, false, "", tempDirFilePath)
-
 
 				// Create File
 				f, err := os.Create(tempDirFilePath)
@@ -219,7 +256,7 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 		contents, _ := os.ReadFile(origPath)
 		os.WriteFile(tempDirFilePath, contents, fs.FileMode(os.O_TRUNC))
 		s.Files.ModifyFull(origPath, string(contents))
-		DiagnoseFile(origPath, s)
+		workspace.DiagnoseFile(origPath, s)
 	}
 }
 
@@ -229,6 +266,12 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 
 	// Path of File that this Event affected
 	origFilePath := change.Path
+
+	// Reload config file if changed
+	if filepath.Base(origFilePath) == faustConfigFile {
+		workspace.loadConfigFiles(s)
+		workspace.cleanDiagnostics(s)
+	}
 
 	file, ok := s.Files.Get(origFilePath)
 	if !ok {
@@ -259,12 +302,11 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 		// Write File to Temporary Directory. Updates the temporary file with the latest content from the editor.
 		logging.Logger.Printf("Writing recent change to %s\n", tempDirFilePath)
 		os.WriteFile(tempDirFilePath, file.Content, fs.FileMode(os.O_TRUNC)) // Write the file content to the temp file, overwriting existing content
-		DiagnoseFile(origFilePath, s)
+		workspace.DiagnoseFile(origFilePath, s)
 	case TDClose:
 		// Sync file from disk on close if it exists and replicate it to temporary directory, else remove from Files Store
 		if util.IsValidPath(origFilePath) { // Check if the file path is valid
 			s.Files.OpenFromPath(origFilePath, s.Workspace.Root, false, "", tempDirFilePath) // Reload the file from the specified path.
-
 
 			file, ok := s.Files.Get(origFilePath) // Retrieve the file again (unnecessary, can use the previous `file`)
 			if ok {
@@ -283,19 +325,21 @@ func (workspace *Workspace) addFileFromFileStore(path util.Path, s *Server) {
 	if ok && IsFaustFile(path) {
 		logging.Logger.Printf("Sending Diagnostic")
 		s.diagChan <- file.Diagnostics()
-		logging.Logger.Printf("Sent Diagnostic")		
+		logging.Logger.Printf("Sent Diagnostic")
 	}
 	workspace.mu.Lock()
 	workspace.Files[path] = file
 	workspace.mu.Unlock()
 }
 
-func DiagnoseFile(path util.Path, s *Server){
+func (w *Workspace) DiagnoseFile(path util.Path, s *Server) {
 	if IsFaustFile(path) {
 		f, ok := s.Files.Get(path)
 		if ok {
 			s.diagChan <- f.Diagnostics()
 		}
+		// Compiler Diagnostics if exists
+		w.sendCompilerDiagnostics(s)
 	}
 }
 
