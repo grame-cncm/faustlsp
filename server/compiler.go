@@ -38,7 +38,8 @@ func getFaustErrorReportingType(s string) FaustErrorReportingType {
 	if len(s) < 5 {
 		return NullError
 	}
-	if s[:5] == "ERROR" {
+	errorstr := s[:5]
+	if errorstr == "ERROR"  || errorstr == "Error" {
 		return Error
 	}
 	return FileError
