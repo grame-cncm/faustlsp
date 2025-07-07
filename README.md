@@ -14,6 +14,8 @@ To install, run
 go install
 ```
 
+This will install a `faustlsp` executable in `$HOME/go/bin`.
+
 # Features
 
 - [x] Document Synchronization
@@ -40,3 +42,7 @@ Configuration Options:
   "compiler_diagnostics": true     // Show Compiler Errors 
 }
 ```
+
+# VS Code
+
+[vscode-faust](https://github.com/carn181/vscode-faust) is a VS Code extension for Faust that works with faustlsp.
