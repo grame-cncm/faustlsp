@@ -55,6 +55,7 @@ func getCompilerDiagnostics(path string, dirPath string, cfg FaustProjectConfig)
 	cmd.Stderr = &errors
 	err := cmd.Run()
 	faustErrors := errors.String()
+	logging.Logger.Printf("Return code of faust compiler: %d\n", err)
 	if err == nil {
 		return transport.Diagnostic{}
 	}
