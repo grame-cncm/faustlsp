@@ -60,6 +60,7 @@ func getCompilerDiagnostics(path string, dirPath string, cfg FaustProjectConfig)
 	}
 
 	errorType := getFaustErrorReportingType(faustErrors)
+	logging.Logger.Printf("Got error from compiler of type: %s, for output: %s\n\n", errorType, faustErrors)
 
 	switch errorType {
 	case FileError:
