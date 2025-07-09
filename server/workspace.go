@@ -2,8 +2,8 @@ package server
 
 import (
 	"context"
-	"faustlsp/logging"
-	"faustlsp/util"
+	"github.com/carn181/faustlsp/logging"
+	"github.com/carn181/faustlsp/util"
 	"io/fs"
 	"os"
 	"path/filepath"

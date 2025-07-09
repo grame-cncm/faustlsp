@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"os"
 
-	"faustlsp/logging"
-	"faustlsp/transport"
-	"faustlsp/util"
+	"github.com/carn181/faustlsp/logging"
+	"github.com/carn181/faustlsp/transport"
+	"github.com/carn181/faustlsp/util"
 )
 
 // Initialize Handler

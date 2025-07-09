@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"faustlsp/logging"
+	"github.com/carn181/faustlsp/logging"
 	"io"
 	"net"
 	"os"

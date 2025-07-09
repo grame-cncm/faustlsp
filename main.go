@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"faustlsp/logging"
-	"faustlsp/server"
-	"faustlsp/transport"
+	"github.com/carn181/faustlsp/logging"
+	"github.com/carn181/faustlsp/server"
+	"github.com/carn181/faustlsp/transport"
 	"fmt"
 	"os"
 	"os/signal"
@@ -13,6 +13,7 @@ import (
 
 func main() {
 	logging.Init()
+
 	logging.Logger.Println("Initialized")
 
 	// Background Context for cancelling

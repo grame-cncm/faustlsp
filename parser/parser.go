@@ -1,7 +1,7 @@
 package parser
 
 import (
-	. "faustlsp/transport"
+	. "github.com/carn181/faustlsp/transport"
 	"fmt"
 	"sync"
 

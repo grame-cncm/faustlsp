@@ -2,8 +2,8 @@ package server
 
 import (
 	"encoding/json"
-	"faustlsp/logging"
-	"faustlsp/transport"
+	"github.com/carn181/faustlsp/logging"
+	"github.com/carn181/faustlsp/transport"
 )
 
 func (s *Server) GenerateDiagnostics() {

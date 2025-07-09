@@ -2,7 +2,7 @@ package tests
 
 import (
 	"bytes"
-	"faustlsp/transport"
+	"github.com/carn181/faustlsp/transport"
 	"fmt"
 	"testing"
 )

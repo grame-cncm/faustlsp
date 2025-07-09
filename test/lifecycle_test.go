@@ -3,9 +3,9 @@ package tests
 import (
 	"context"
 	"encoding/json"
-	"faustlsp/logging"
-	"faustlsp/server"
-	"faustlsp/transport"
+	"github.com/carn181/faustlsp/logging"
+	"github.com/carn181/faustlsp/server"
+	"github.com/carn181/faustlsp/transport"
 
 	"testing"
 	"time"

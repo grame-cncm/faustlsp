@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"faustlsp/logging"
-	"faustlsp/transport"
-	"faustlsp/util"
+	"github.com/carn181/faustlsp/logging"
+	"github.com/carn181/faustlsp/transport"
+	"github.com/carn181/faustlsp/util"
 	"path/filepath"
 )
 

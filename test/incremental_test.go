@@ -1,8 +1,8 @@
 package tests
 
 import (
-	"faustlsp/server"
-	"faustlsp/transport"
+	"github.com/carn181/faustlsp/server"
+	"github.com/carn181/faustlsp/transport"
 	"fmt"
 	"testing"
 	"unicode/utf8"
