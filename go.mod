@@ -1,4 +1,4 @@
-module faustlsp
+module github.com/carn181/faustlsp
 
 go 1.24.3
 
