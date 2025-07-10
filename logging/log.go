@@ -3,11 +3,9 @@ package logging
 import (
 	"log"
 	"os"
-	//	"runtime"
+	"path/filepath"
+	"time"
 )
-
-// logPath defines the default log file path based on OS.
-var logPath string
 
 // Logger is the global logger instance.
 var Logger *log.Logger
@@ -16,20 +14,17 @@ var Logger *log.Logger
 func Init() {
 	// TODO: Add option to take log file path from user
 
-	// Determine the log file path based on the operating system.
-	// switch runtime.GOOS {
-	// case "windows":
-	// 	logPath = "faust-lsp-log.txt"
-	// case "linux", "darwin", "freebsd", "openbsd", "netbsd", "plan9":
-	// 	logPath = "/tmp/faust-lsp-log.txt"
-	// default:
-	// 	logPath = "faust-lsp-log.txt"
-	// }
-
 	// os.TempDir gives temporary directory of any platform
-	f, err := os.CreateTemp("", "faust-lsp-log-*.txt")
+	faustTempDir := filepath.Join(os.TempDir(), "faustlsp")
+	os.Mkdir(faustTempDir, 0750)
+
+	currTime := time.Now().Format("15-04-05")
+	logFile := "log-" + currTime + ".txt"
+	logFilePath := filepath.Join(faustTempDir, logFile)
+
+	f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_RDWR, 0755)
 	if err != nil {
-		panic("Couldn't create temporary log file")
+		panic(err)
 	}
 
 	// Initialize the logger to write to the file, without flags or prefixes.

@@ -5,14 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sync"
+
 	"github.com/carn181/faustlsp/logging"
 	"github.com/carn181/faustlsp/parser"
 	"github.com/carn181/faustlsp/transport"
 	"github.com/carn181/faustlsp/util"
-	"fmt"
-	"os"
-	"reflect"
-	"sync"
 )
 
 // TODO: Have a type for request ID
@@ -63,8 +65,8 @@ func (s *Server) Init(transp transport.TransportMethod) {
 	parser.Init()
 
 	// Create Temporary Directory
-	os_temp := os.TempDir()
-	temp_dir, err := os.MkdirTemp(os_temp, "faustlsp-")
+	faustTemp := filepath.Join(os.TempDir(), "faustlsp") // No need to create $TEMPDIR/faustlsp as logging should create it
+	temp_dir, err := os.MkdirTemp(faustTemp, "faustlsp-")
 	if err != nil {
 		logging.Logger.Fatalf("Couldn't create temp dir: %s\n", err)
 		return
