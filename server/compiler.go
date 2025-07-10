@@ -1,13 +1,13 @@
 package server
 
 import (
-	"github.com/carn181/faustlsp/logging"
-	"github.com/carn181/faustlsp/transport"
-	"fmt"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/carn181/faustlsp/logging"
+	"github.com/carn181/faustlsp/transport"
 )
 
 type FaustError struct {
@@ -39,7 +39,7 @@ func getFaustErrorReportingType(s string) FaustErrorReportingType {
 		return NullError
 	}
 	errorstr := s[:5]
-	if errorstr == "ERROR"  || errorstr == "Error" {
+	if errorstr == "ERROR" || errorstr == "Error" {
 		return Error
 	}
 	return FileError
@@ -111,7 +111,7 @@ func parseFileError(s string) FaustError {
 	re := regexp.MustCompile(`(?s)(.+):([-\d]+)\s:\sERROR\s:\s(.*)`)
 	captures := re.FindStringSubmatch(s)
 	if len(captures) < 4 {
-		panic(fmt.Errorf("Expected 4 values in %+v\n", captures))
+		logging.Logger.Fatalf("Expected 4 values in %+v\n", captures)
 	}
 	line, _ := strconv.Atoi(captures[2])
 	return FaustError{File: captures[1], Line: line, Message: captures[3]}
@@ -121,7 +121,7 @@ func parseError(s string) FaustError {
 	re := regexp.MustCompile(`(?s)ERROR\s:\s(.*)`)
 	captures := re.FindStringSubmatch(s)
 	if len(captures) < 2 {
-		panic(fmt.Errorf("Expected 2 values in %+v\n", captures))
+		logging.Logger.Fatalf("Expected 2 values in %+v\n", captures)
 	}
 	return FaustError{Message: captures[1]}
 }

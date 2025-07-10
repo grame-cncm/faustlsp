@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/carn181/faustlsp/logging"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -16,7 +17,7 @@ func WatchReplicateDir(ctx context.Context, origdir string, replicdir string) {
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		panic(err)
+		logging.Logger.Fatal(err)
 	}
 	watcher.Add("./")
 
@@ -40,7 +41,7 @@ func WatchReplicateDir(ctx context.Context, origdir string, replicdir string) {
 					} else {
 						f, err := os.Create(temp_path)
 						if err != nil {
-							panic(err)
+							logging.Logger.Fatal(err)
 						}
 						f.Chmod(fi.Mode())
 						f.Close()
