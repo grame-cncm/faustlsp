@@ -3,7 +3,6 @@ package logging
 import (
 	"log"
 	"os"
-	"path/filepath"
 	//	"runtime"
 )
 
@@ -28,13 +27,11 @@ func Init() {
 	// }
 
 	// os.TempDir gives temporary directory of any platform
-	logPath = filepath.Join(os.TempDir(),"faust-lsp-log.txt")
-
-	// Open the log file.  Create it if it doesn't exist.
-	f, err := os.OpenFile(logPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	f, err := os.CreateTemp("", "faust-lsp-log-*.txt")
 	if err != nil {
-		panic("Couldn't Open File")
+		panic("Couldn't create temporary log file")
 	}
+
 	// Initialize the logger to write to the file, without flags or prefixes.
 	Logger = log.New(f, "faust-lsp: ", log.Ltime)
 }
