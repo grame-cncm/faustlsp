@@ -64,17 +64,18 @@ func Formatting(ctx context.Context, s *Server, id any, par json.RawMessage) (js
 	}
 
 	f, ok := s.Files.Get(path)
+	content := f.Content
 	var output []byte
 	if ok {
-		output, err = Format(f.Content, GetIndent(params))
+		output, err = Format(content, GetIndent(params))
 		if err != nil {
 			logging.Logger.Print(err)
 		}
 	}
 	logging.Logger.Printf("Got this for formatting: '%s'", string(output))
 
-	end, err := OffsetToPosition(uint(len(output)),
-		string(output),
+	end, err := OffsetToPosition(uint(len(content)),
+		string(content),
 		string(s.Files.encoding))
 	if err != nil {
 		logging.Logger.Println(err)

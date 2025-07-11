@@ -31,10 +31,6 @@ type File struct {
 	hasSyntaxErrors bool
 }
 
-// Concurrency issues with Treesitter Tree
-// 1) Concurrently trying to do things with f.Tree, impossible
-// 2) Doing something with Tree while concurrently it is closed and reopened => Therefore needs to be copied for these operations
-
 func (f *File) DocumentSymbols() []transport.DocumentSymbol {
 	t := f.Tree.Clone()
 	defer t.Close()

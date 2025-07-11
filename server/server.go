@@ -121,6 +121,9 @@ func (s *Server) Loop(ctx context.Context, end chan<- error) {
 		// Read one JSON RPC Message
 		logging.Logger.Println("Reading")
 		msg, err = s.Transport.Read()
+		if err != nil {
+			logging.Logger.Printf("Got error while scanning: %s\n", err)
+		}
 
 		// Parse JSON RPC Message here and get method
 		method, err = transport.GetMethod(msg)
@@ -128,6 +131,7 @@ func (s *Server) Loop(ctx context.Context, end chan<- error) {
 			break
 		}
 		if err != nil {
+			logging.Logger.Printf("Got error while parsing message: %s\n", err)
 			break
 		}
 

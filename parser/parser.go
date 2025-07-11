@@ -205,7 +205,6 @@ func DocumentSymbolsRecursive(node *tree_sitter.Node, content []byte) DocumentSy
 }
 
 func GetQueryMatches(queryStr string, code []byte, tree *tree_sitter.Tree) TSQueryResult {
-	tsParser.treesToClose = append(tsParser.treesToClose, tree)
 	//	defer tree.Close()
 
 	query, _ := tree_sitter.NewQuery(tsParser.language, queryStr)
@@ -235,7 +234,4 @@ func GetQueryMatches(queryStr string, code []byte, tree *tree_sitter.Tree) TSQue
 
 func Close() {
 	//	tsParser.parser.Close()
-	for _, tree := range tsParser.treesToClose {
-		tree.Close()
-	}
 }

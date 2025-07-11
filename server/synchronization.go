@@ -3,10 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
+
 	"github.com/carn181/faustlsp/logging"
 	"github.com/carn181/faustlsp/transport"
 	"github.com/carn181/faustlsp/util"
-	"path/filepath"
 )
 
 type TDChangeType int
@@ -27,7 +28,10 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	json.Unmarshal(par, &params)
 
 	fileURI := params.TextDocument.URI
-	path, _ := util.Uri2path(string(fileURI))
+	path, err := util.Uri2path(string(fileURI))
+	if err != nil {
+		logging.Logger.Fatalf("%s, %s -> %s\n", err, fileURI, path)
+	}
 	// Open File
 	// Path relative to workspace
 	relPath := path[len(s.Workspace.Root)+1:]
@@ -39,7 +43,6 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	logging.Logger.Printf("Opening File %s\n", string(fileURI))
 	f, _ := s.Files.Get(path)
 	logging.Logger.Printf("Current File: %s\n", f.Content)
-
 
 	s.Workspace.TDEvents <- TDEvent{Type: TDOpen, Path: path}
 	return nil
@@ -100,7 +103,8 @@ func TextDocumentClose(ctx context.Context, s *Server, par json.RawMessage) erro
 
 	s.Files.CloseFromURI(util.Path(params.TextDocument.URI))
 
-	path, _ := util.Uri2path(string(fileURI))
+	path, err := util.Uri2path(string(fileURI))
+	logging.Logger.Println("Got %s as error when getting path from URI", err)
 	s.Workspace.TDEvents <- TDEvent{Type: TDClose, Path: path}
 
 	logging.Logger.Printf("Closed File %s\n", string(fileURI))

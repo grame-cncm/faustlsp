@@ -5,11 +5,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/carn181/faustlsp/logging"
 	"io"
 	"net"
 	"os"
 	"strconv"
+
+	"github.com/carn181/faustlsp/logging"
 )
 
 type TransportMethod int
@@ -77,14 +78,23 @@ func (t *Transport) Init(ttype TransportType, method TransportMethod) {
 		t.Writer = conn
 	}
 
+	// TODO: Find dynamic buffer for handling large files
+	const maxBufferSize = 1024 * 1024 * 10 // 10 MB
+	buf := make([]byte, maxBufferSize)
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(buf, maxBufferSize)
 	scanner.Split(split)
 	t.Scanner = scanner
 }
 
 // Reads one JSON RPC message from the stream
 func (t *Transport) Read() ([]byte, error) {
-	t.Closed = !t.Scanner.Scan()
+	hasError := !t.Scanner.Scan()
+	if hasError {
+		if t.Scanner.Err() == nil {
+			t.Closed = true
+		}
+	}
 	return t.Scanner.Bytes(), t.Scanner.Err()
 }
 
