@@ -108,7 +108,7 @@ func getCompilerDiagnostics(path string, dirPath string, cfg FaustProjectConfig)
 }
 
 func parseFileError(s string) FaustError {
-	re := regexp.MustCompile(`(?s)(.+):([-\d]+)\s:\sERROR\s:\s(.*)`)
+	re := regexp.MustCompile(`(?s)(.+):\s*([-\d]+)\s:\sERROR\s:\s(.*)`)
 	captures := re.FindStringSubmatch(s)
 	if len(captures) < 4 {
 		logging.Logger.Fatalf("Expected 4 values in %+v\n", captures)
