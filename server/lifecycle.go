@@ -44,6 +44,7 @@ func Initialize(ctx context.Context, s *Server, id any, par json.RawMessage) (js
 					ChangeNotifications: "ws",
 				},
 			},
+			DocumentFormattingProvider: &transport.Or_ServerCapabilities_documentFormattingProvider{Value: true},
 		},
 		ServerInfo: &transport.ServerInfo{Name: "faust-lsp", Version: "0.0.1"},
 	}

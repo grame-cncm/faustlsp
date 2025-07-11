@@ -247,6 +247,35 @@ func PositionToOffset(pos transport.Position, s string, encoding string) (uint, 
 	return currChar, nil
 }
 
+func OffsetToPosition(offset uint, s string, encoding string) (transport.Position, error) {
+	if len(s) == 0 || offset == 0 {
+		return transport.Position{Line: 0, Character: 0}, nil
+	}
+	line := uint32(0)
+	char := uint32(0)
+
+	// Iterate through string byte by byte and keep increasing char for every. If rune == '\n', increase line and reset character to 0.
+	str := []byte(s)
+
+	for i := uint(0); i < offset; {
+		r, w := utf8.DecodeRune(str[i:])
+		//		fmt.Println(w)
+		//		time.Sleep(1 * time.Second)
+		i += uint(w)
+		char++
+		if r >= 0x10000 && encoding == "utf-16" {
+			char++
+		}
+		if r == '\n' {
+			line++
+			char = 0
+		}
+		//		fmt.Printf("%s: %d:%d\n", string(r), line, char)
+	}
+
+	return transport.Position{Line: line, Character: char}, nil
+}
+
 func GetLineIndices(s string) []uint {
 	//	logging.Logger.Printf("Got %s\n", s)
 	lines := []uint{0}
@@ -300,7 +329,9 @@ func (files *Files) Remove(path util.Path) {
 func (files *Files) String() string {
 	str := ""
 	for path, f := range files.fs {
-		str += fmt.Sprintf("%s\n %s\n", path, string(f.Content))
+		if IsFaustFile(path) {
+			str += fmt.Sprintf("%s\n %s\n", path, string(f.Content))
+		}
 	}
 	return str
 }

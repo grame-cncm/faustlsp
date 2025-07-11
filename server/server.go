@@ -227,6 +227,7 @@ func (s *Server) HandleMethod(ctx context.Context, method string, message []byte
 var requestHandlers = map[string]func(context.Context, *Server, interface{}, json.RawMessage) (json.RawMessage, error){
 	"initialize":                  Initialize,
 	"textDocument/documentSymbol": TextDocumentSymbol,
+	"textDocument/formatting":     Formatting,
 	"shutdown":                    ShutdownEnd,
 }
 
