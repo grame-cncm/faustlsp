@@ -1,9 +1,10 @@
 package parser
 
 import (
-	. "github.com/carn181/faustlsp/transport"
 	"fmt"
 	"sync"
+
+	. "github.com/carn181/faustlsp/transport"
 
 	tree_sitter_faust "github.com/khiner/tree-sitter-faust/bindings/go"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"

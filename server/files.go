@@ -2,13 +2,14 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
 	"github.com/carn181/faustlsp/logging"
 	"github.com/carn181/faustlsp/parser"
 	"github.com/carn181/faustlsp/transport"
 	"github.com/carn181/faustlsp/util"
-	"fmt"
-	"os"
-	"path/filepath"
 
 	//	"strings"
 	"sync"
@@ -30,13 +31,21 @@ type File struct {
 	hasSyntaxErrors bool
 }
 
+// Concurrency issues with Treesitter Tree
+// 1) Concurrently trying to do things with f.Tree, impossible
+// 2) Doing something with Tree while concurrently it is closed and reopened => Therefore needs to be copied for these operations
+
 func (f *File) DocumentSymbols() []transport.DocumentSymbol {
-	return parser.DocumentSymbols(f.Tree, f.Content)
+	t := f.Tree.Clone()
+	defer t.Close()
+	return parser.DocumentSymbols(t, f.Content)
 	//	return []transport.DocumentSymbol{}
 }
 
 func (f *File) TSDiagnostics() transport.PublishDiagnosticsParams {
-	errors := parser.TSDiagnostics(f.Content, f.Tree)
+	t := f.Tree.Clone()
+	defer t.Close()
+	errors := parser.TSDiagnostics(f.Content, t)
 	if len(errors) == 0 {
 		f.hasSyntaxErrors = false
 	} else {
@@ -134,6 +143,18 @@ func (files *Files) Get(path util.Path) (*File, bool) {
 	file, ok := files.fs[path]
 	files.mu.Unlock()
 	return file, ok
+}
+
+func (files *Files) TSDiagnostics(path util.Path) transport.PublishDiagnosticsParams {
+	d := transport.PublishDiagnosticsParams{}
+	files.mu.Lock()
+	file, ok := files.fs[path]
+	if ok {
+		d = file.TSDiagnostics()
+
+	}
+	files.mu.Unlock()
+	return d
 }
 
 func (files *Files) ModifyFull(path util.Path, content string) {

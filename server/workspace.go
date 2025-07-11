@@ -2,12 +2,13 @@ package server
 
 import (
 	"context"
-	"github.com/carn181/faustlsp/logging"
-	"github.com/carn181/faustlsp/util"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/carn181/faustlsp/logging"
+	"github.com/carn181/faustlsp/util"
 
 	"github.com/fsnotify/fsnotify"
 	cp "github.com/otiai10/copy"
@@ -330,9 +331,9 @@ func (workspace *Workspace) addFileFromFileStore(path util.Path, s *Server) {
 
 func (w *Workspace) DiagnoseFile(path util.Path, s *Server) {
 	if IsFaustFile(path) {
-		f, ok := s.Files.Get(path)
-		if ok {
-			s.diagChan <- f.TSDiagnostics()
+		params := s.Files.TSDiagnostics(path)
+		if params.URI != "" {
+			s.diagChan <- params
 		}
 		// Compiler Diagnostics if exists
 		if w.config.CompilerDiagnostics {
