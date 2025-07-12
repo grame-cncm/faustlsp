@@ -2,19 +2,20 @@ package server
 
 import (
 	"encoding/json"
+	"path/filepath"
+
 	"github.com/carn181/faustlsp/logging"
 	"github.com/carn181/faustlsp/transport"
 	"github.com/carn181/faustlsp/util"
-	"path/filepath"
 )
 
 type FaustProjectConfig struct {
-	Command      string      `json:"command,omitempty"`
-	Type         string      `json:"type"` // Actually make this enum between Process or Library
-	ProcessName  string      `json:"process_name,omitempty"`
-	ProcessFiles []util.Path `json:"process_files,omitempty"`
-	IncludeDir   []util.Path `json:"include,omitempty"`
-	CompilerDiagnostics bool `json:"compiler_diagnostics,omitempty"`
+	Command             string      `json:"command,omitempty"`
+	Type                string      `json:"type"` // Actually make this enum between Process or Library
+	ProcessName         string      `json:"process_name,omitempty"`
+	ProcessFiles        []util.Path `json:"process_files,omitempty"`
+	IncludeDir          []util.Path `json:"include,omitempty"`
+	CompilerDiagnostics bool        `json:"compiler_diagnostics,omitempty"`
 }
 
 // Ideal behavior of config file
@@ -54,11 +55,11 @@ func (w *Workspace) sendCompilerDiagnostics(s *Server) {
 	}
 }
 
-func (c *FaustProjectConfig) UnmarshalJSON(content []byte) error{
+func (c *FaustProjectConfig) UnmarshalJSON(content []byte) error {
 	type Config FaustProjectConfig
 	var cfg = Config{
-		Command: "faust",
-		ProcessName: "process",
+		Command:             "faust",
+		ProcessName:         "process",
 		CompilerDiagnostics: true,
 	}
 	if err := json.Unmarshal(content, &cfg); err != nil {
@@ -85,9 +86,9 @@ func (w *Workspace) parseConfig(content []byte) (FaustProjectConfig, error) {
 func (w *Workspace) defaultConfig() FaustProjectConfig {
 	logging.Logger.Printf("Using default config file\n")
 	var config = FaustProjectConfig{
-		Command:      "faust",
-		Type:         "process",
-		ProcessFiles: w.getFaustDSPRelativePaths(),
+		Command:             "faust",
+		Type:                "process",
+		ProcessFiles:        w.getFaustDSPRelativePaths(),
 		CompilerDiagnostics: true,
 	}
 	return config

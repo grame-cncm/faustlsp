@@ -19,7 +19,6 @@ This will install a `faustlsp` executable in `$HOME/go/bin`.
 # Features
 
 - [x] Document Synchronization
-- [x] Workspace Replication
 - [x] Diagnostics
   - [x] Syntax Errors
   - [x] Compiler Errors (can disable as they look ugly due to compiler limitations)

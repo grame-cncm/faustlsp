@@ -176,7 +176,6 @@ func (files *Files) ModifyFull(path util.Path, content string) {
 	files.mu.Unlock()
 }
 
-// TODO: Implement ModifyIncremental
 func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Range, content string) {
 	logging.Logger.Printf("Applying Incremental Change to %s\n", path)
 	files.mu.Lock()
@@ -215,30 +214,27 @@ func PositionToOffset(pos transport.Position, s string, encoding string) (uint, 
 	}
 	indices := GetLineIndices(s)
 	if pos.Line > uint32(len(indices)) {
-		return 0, fmt.Errorf("Invalid Line Number")
+		return 0, fmt.Errorf("invalid Line Number")
 	} else if pos.Line == uint32(len(indices)) {
 		return uint(len(s)), nil
 	}
-	//	logging.Logger.Print(indices)
 	currChar := indices[pos.Line]
-	//	logging.Logger.Printf("Line Start: %d\n", currChar)
 	for i := 0; i < int(pos.Character); i++ {
+		if int(currChar) >= len(s) {
+			break // Prevent reading past end of string
+		}
 		r, w := utf8.DecodeRuneInString(s[currChar:])
+		if w == 0 {
+			break // Prevent infinite loop if decoding fails
+		}
 		currChar += uint(w)
-		//		fmt.Printf("Curr Char rn: %d\n",currChar)
-
-		// If protocol is sending utf-16 offset, increment current character index if it has surrogate code-point
 		if encoding == "utf-16" {
-			//			logging.Logger.Println("Got UTF-16 Encoding")
 			if r >= 0x10000 {
 				i++
 				if i == int(pos.Character) {
 					break
 				}
 			}
-			// Some clients like emacs lsp-mode do not properly support utf-16
-		} else if encoding == "utf-32" {
-			//			logging.Logger.Println("Got UTF-32 Encoding")
 		}
 	}
 	return currChar, nil
@@ -250,24 +246,23 @@ func OffsetToPosition(offset uint, s string, encoding string) (transport.Positio
 	}
 	line := uint32(0)
 	char := uint32(0)
-
-	// Iterate through string byte by byte and keep increasing char for every. If rune == '\n', increase line and reset character to 0.
 	str := []byte(s)
 
-	for i := uint(0); i < offset; {
+	for i := uint(0); i < offset && i < uint(len(str)); {
 		r, w := utf8.DecodeRune(str[i:])
-		//		fmt.Println(w)
-		//		time.Sleep(1 * time.Second)
-		i += uint(w)
-		char++
-		if r >= 0x10000 && encoding == "utf-16" {
-			char++
+		if w == 0 {
+			break // Prevent infinite loop if decoding fails
 		}
 		if r == '\n' {
 			line++
 			char = 0
+		} else {
+			char++
+			if r >= 0x10000 && encoding == "utf-16" {
+				char++
+			}
 		}
-		//		fmt.Printf("%s: %d:%d\n", string(r), line, char)
+		i += uint(w)
 	}
 
 	return transport.Position{Line: line, Character: char}, nil
