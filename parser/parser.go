@@ -54,6 +54,10 @@ func TSDiagnostics(code []byte, tree *tree_sitter.Tree) []Diagnostic {
 		for _, node := range errors {
 			// First named parent node from error
 			prev := node.Parent()
+			if prev == nil {
+				break
+			}
+
 			if prev.GrammarName() == "ERROR" {
 				continue
 			}
@@ -205,8 +209,6 @@ func DocumentSymbolsRecursive(node *tree_sitter.Node, content []byte) DocumentSy
 }
 
 func GetQueryMatches(queryStr string, code []byte, tree *tree_sitter.Tree) TSQueryResult {
-	//	defer tree.Close()
-
 	query, _ := tree_sitter.NewQuery(tsParser.language, queryStr)
 	defer query.Close()
 

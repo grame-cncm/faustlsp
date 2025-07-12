@@ -32,15 +32,16 @@ type File struct {
 }
 
 func (f *File) DocumentSymbols() []transport.DocumentSymbol {
-	t := f.Tree.Clone()
-	defer t.Close()
+	// TODO: Find a way to have tree without having to worry about
+	t := parser.ParseTree(f.Content)
+	//	defer t.Close()
 	return parser.DocumentSymbols(t, f.Content)
 	//	return []transport.DocumentSymbol{}
 }
 
 func (f *File) TSDiagnostics() transport.PublishDiagnosticsParams {
-	t := f.Tree.Clone()
-	defer t.Close()
+	t := parser.ParseTree(f.Content)
+	//	defer t.Close()
 	errors := parser.TSDiagnostics(f.Content, t)
 	if len(errors) == 0 {
 		f.hasSyntaxErrors = false
@@ -109,10 +110,10 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 	ext := filepath.Ext(path)
 	if ext == ".dsp" || ext == ".lib" {
 		//		logging.Logger.Printf("Trying to parse %s\n", content)
-		tree = parser.ParseTree(content)
-		treemade = true
+		//		tree = parser.ParseTree(content)
+		//		treemade = true
 	} else {
-		treemade = false
+		//		treemade = false
 	}
 
 	if uri == "" {
@@ -166,11 +167,11 @@ func (files *Files) ModifyFull(path util.Path, content string) {
 	ext := filepath.Ext(path)
 	if ext == ".dsp" || ext == ".lib" {
 		if f.treeCreated {
-			f.Tree.Close()
+			//			f.Tree.Close()
 		}
 		//		logging.Logger.Printf("Trying to parse %s\n", f.Content)
-		f.Tree = parser.ParseTree(f.Content)
-		f.treeCreated = true
+		//		f.Tree = parser.ParseTree(f.Content)
+		//		f.treeCreated = true
 	}
 	files.mu.Unlock()
 }
@@ -191,11 +192,11 @@ func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Rang
 	ext := filepath.Ext(path)
 	if ext == ".dsp" || ext == ".lib" {
 		if f.treeCreated {
-			f.Tree.Close()
+			//			f.Tree.Close()
 		}
 		//		logging.Logger.Printf("Trying to parse %s\n", f.Content)
-		f.Tree = parser.ParseTree(f.Content)
-		f.treeCreated = true
+		//		f.Tree = parser.ParseTree(f.Content)
+		//		f.treeCreated = true
 	}
 	files.mu.Unlock()
 }
@@ -314,7 +315,7 @@ func (files *Files) Remove(path util.Path) {
 		ext := filepath.Ext(path)
 		if ext == ".dsp" || ext == ".lib" {
 			if f.treeCreated {
-				f.Tree.Close()
+				//				f.Tree.Close()
 			}
 		}
 	}
