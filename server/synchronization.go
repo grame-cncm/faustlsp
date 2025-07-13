@@ -30,7 +30,7 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	fileURI := params.TextDocument.URI
 	path, err := util.Uri2path(string(fileURI))
 	if err != nil {
-		logging.Logger.Fatalf("%s, %s -> %s\n", err, fileURI, path)
+		logging.Logger.Error("Failed to convert URI to path", "error", err, "uri", fileURI, "path", path)
 	}
 	// Open File
 	// Path relative to workspace
@@ -40,24 +40,20 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 
 	s.Files.OpenFromURI(string(fileURI), s.Workspace.Root, true, tempDirFilePath)
 
-	logging.Logger.Printf("Opening File %s\n", string(fileURI))
+	logging.Logger.Info("Opening File", "uri", string(fileURI))
 	f, _ := s.Files.Get(path)
-	logging.Logger.Printf("Current File: %s\n", f.Content)
+	logging.Logger.Info("Current File", "content", f.Content)
 
 	s.Workspace.TDEvents <- TDEvent{Type: TDOpen, Path: path}
 	return nil
 }
 
 func TextDocumentChangeFull(ctx context.Context, s *Server, par json.RawMessage) error {
-	// TODO: Check if server-client agreed to incremental and do incremental change, else do full
-	// TODO: Handle incremental changes. Currently only full
-
 	var params transport.DidChangeTextDocumentParams
 	json.Unmarshal(par, &params)
 
 	fileURI := params.TextDocument.URI
 
-	// Apply Full TextDocumentChange
 	path, err := util.Uri2path(string(fileURI))
 	if err != nil {
 		return err
@@ -66,21 +62,16 @@ func TextDocumentChangeFull(ctx context.Context, s *Server, par json.RawMessage)
 		s.Files.ModifyFull(path, change.Text)
 	}
 	s.Workspace.TDEvents <- TDEvent{Type: TDChange, Path: path}
-	logging.Logger.Printf("Modified File %s\n", string(fileURI))
-	//	logging.Logger.Printf("Current Files: %s\n", s.Files)
+	logging.Logger.Info("Modified File", "fileURI", string(fileURI))
 	return nil
 }
 
 func TextDocumentChangeIncremental(ctx context.Context, s *Server, par json.RawMessage) error {
-	// TODO: Check if server-client agreed to incremental and do incremental change, else do full
-	// TODO: Handle incremental changes. Currently only full
-
 	var params transport.DidChangeTextDocumentParams
 	json.Unmarshal(par, &params)
-	logging.Logger.Println(string(par))
+	logging.Logger.Info("TextDocumentChangeIncremental", "params", string(par))
 	fileURI := params.TextDocument.URI
 
-	// Apply Full TextDocumentChange
 	path, err := util.Uri2path(string(fileURI))
 	if err != nil {
 		return err
@@ -90,8 +81,6 @@ func TextDocumentChangeIncremental(ctx context.Context, s *Server, par json.RawM
 	}
 
 	s.Workspace.TDEvents <- TDEvent{Type: TDChange, Path: path}
-	//	logging.Logger.Printf("Modified File %s\n", string(fileURI))
-	//	logging.Logger.Printf("Current Files: %s\n", s.Files)
 	return nil
 }
 
@@ -104,10 +93,10 @@ func TextDocumentClose(ctx context.Context, s *Server, par json.RawMessage) erro
 	s.Files.CloseFromURI(util.Path(params.TextDocument.URI))
 
 	path, err := util.Uri2path(string(fileURI))
-	logging.Logger.Println("Got %s as error when getting path from URI", err)
+	logging.Logger.Error("Got error when getting path from URI", "error", err)
 	s.Workspace.TDEvents <- TDEvent{Type: TDClose, Path: path}
 
-	logging.Logger.Printf("Closed File %s\n", string(fileURI))
+	logging.Logger.Info("Closed File", "uri", string(fileURI))
 	//	logging.Logger.Printf("Current Files: %s\n", s.Files)
 	return nil
 }

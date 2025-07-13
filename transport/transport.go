@@ -60,18 +60,18 @@ func (t *Transport) Init(ttype TransportType, method TransportMethod) {
 		case Server:
 			t.ln, err = net.Listen("tcp", ":5007")
 			if err != nil {
-				logging.Logger.Fatal(err)
+				logging.Logger.Error("Connection error", "error", err)
 			}
 			conn, err = t.ln.Accept()
 			if err != nil {
-				logging.Logger.Fatal(err)
+				logging.Logger.Error("Connection error", "error", err)
 			}
 		case Client:
 			var err error
 			conn, err = net.Dial("tcp", "localhost:5007")
 			t.conn = conn
 			if err != nil {
-				logging.Logger.Fatal(err)
+				logging.Logger.Error("Connection error", "error", err)
 			}
 		}
 		r = conn
@@ -142,7 +142,7 @@ func (t *Transport) WriteRequest(id any, method string, params json.RawMessage) 
 		return err
 	}
 
-	logging.Logger.Println("Writing " + string(msg))
+	logging.Logger.Info("Writing " + string(msg))
 	err = t.Write(msg)
 	return err
 }
@@ -160,7 +160,7 @@ func (t *Transport) WriteResponse(id any, response json.RawMessage, responseErro
 		return err
 	}
 
-	logging.Logger.Println("Writing " + string(msg))
+	logging.Logger.Info("Writing " + string(msg))
 	err = t.Write(msg)
 	return err
 }
@@ -184,12 +184,12 @@ func split(data []byte, _ bool) (advance int, token []byte, err error) {
 
 	// Content-Length: <number>
 	if len(header) < len("Content-Length: ") {
-		return 0, nil, errors.New("Invalid Header: " + string(header))
+		return 0, nil, errors.New("invalid Header: " + string(header))
 	}
 	contentLengthBytes := header[len("Content-Length: "):]
 	contentLength, err := strconv.Atoi(string(contentLengthBytes))
 	if err != nil {
-		return 0, nil, errors.New("Invalid Content Length")
+		return 0, nil, errors.New("invalid Content Length")
 	}
 
 	if len(content) < contentLength {

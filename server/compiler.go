@@ -55,18 +55,18 @@ func getCompilerDiagnostics(path string, dirPath string, cfg FaustProjectConfig)
 	cmd.Stderr = &errors
 	err := cmd.Run()
 	faustErrors := errors.String()
-	logging.Logger.Printf("Return code of faust compiler: %s\n", err)
+	logging.Logger.Info("Return code of faust compiler", "error", err)
 	if err == nil {
 		return transport.Diagnostic{}
 	}
 
 	errorType := getFaustErrorReportingType(faustErrors)
-	logging.Logger.Printf("Got error from compiler of type: %s, for output: %s\n\n", errorType, faustErrors)
+	logging.Logger.Info("Got error from compiler", "type", errorType, "output", faustErrors)
 
 	switch errorType {
 	case FileError:
 		error := parseFileError(errors.String())
-		logging.Logger.Println(error)
+		logging.Logger.Info("FileError", "error", error)
 		if error.Line > 0 {
 			error.Line -= 1
 		}
@@ -92,7 +92,7 @@ func getCompilerDiagnostics(path string, dirPath string, cfg FaustProjectConfig)
 		}
 	case Error:
 		error := parseError(errors.String())
-		logging.Logger.Printf("%+v\n", parseError(errors.String()))
+		logging.Logger.Info("Error", "error", error)
 		return transport.Diagnostic{
 			Range:    transport.Range{},
 			Message:  error.Message,
@@ -100,7 +100,7 @@ func getCompilerDiagnostics(path string, dirPath string, cfg FaustProjectConfig)
 			Source:   "faust",
 		}
 	case NullError:
-		logging.Logger.Printf("Unrecognized Error\n")
+		logging.Logger.Info("Unrecognized Error")
 		return transport.Diagnostic{}
 	default:
 		return transport.Diagnostic{}
@@ -111,7 +111,7 @@ func parseFileError(s string) FaustError {
 	re := regexp.MustCompile(`(?s)(.+):\s*([-\d]+)\s:\sERROR\s:\s(.*)`)
 	captures := re.FindStringSubmatch(s)
 	if len(captures) < 4 {
-		logging.Logger.Fatalf("Expected 4 values in %+v\n", captures)
+		logging.Logger.Error("Expected 4 values in parseFileError", "captures", captures)
 	}
 	line, _ := strconv.Atoi(captures[2])
 	return FaustError{File: captures[1], Line: line, Message: captures[3]}
@@ -121,7 +121,7 @@ func parseError(s string) FaustError {
 	re := regexp.MustCompile(`(?s)ERROR\s:\s(.*)`)
 	captures := re.FindStringSubmatch(s)
 	if len(captures) < 2 {
-		logging.Logger.Fatalf("Expected 2 values in %+v\n", captures)
+		logging.Logger.Error("Expected 2 values in parseError", "captures", captures)
 	}
 	return FaustError{Message: captures[1]}
 }

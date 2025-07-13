@@ -67,13 +67,12 @@ func (s *Server) Init(transp transport.TransportMethod) {
 	faustTemp := filepath.Join(os.TempDir(), "faustlsp") // No need to create $TEMPDIR/faustlsp as logging should create it
 	temp_dir, err := os.MkdirTemp(faustTemp, "faustlsp-")
 	if err != nil {
-		logging.Logger.Fatalf("Couldn't create temp dir: %s\n", err)
+		logging.Logger.Error("Couldn't create temp dir", "error", err)
 		return
 	} else {
-		logging.Logger.Printf("Created Temp Directory at %s\n", temp_dir)
+		logging.Logger.Info("Created Temp Directory", "path", temp_dir)
 	}
 	s.tempDir = temp_dir
-	return
 }
 
 // Might be pointless ?
@@ -86,14 +85,14 @@ func (s *Server) Run(ctx context.Context) error {
 	case err := <-end:
 		if err != nil {
 			errormsg := "Ending because of error (" + err.Error() + ")"
-			logging.Logger.Println(errormsg)
+			logging.Logger.Info(errormsg)
 			fmt.Println(errormsg)
 			returnError = errors.New(err.Error())
 		} else {
-			logging.Logger.Println("LSP Successfully Exited")
+			logging.Logger.Info("LSP Successfully Exited")
 		}
 	case <-ctx.Done():
-		logging.Logger.Println("Canceling Main Loop")
+		logging.Logger.Info("Canceling Main Loop")
 	}
 
 	// TODO: Have a proper cleanup function here
@@ -118,10 +117,10 @@ func (s *Server) Loop(ctx context.Context, end chan<- error) {
 		}
 
 		// Read one JSON RPC Message
-		logging.Logger.Println("Reading")
+		logging.Logger.Debug("Reading")
 		msg, err = s.Transport.Read()
 		if err != nil {
-			logging.Logger.Printf("Got error while scanning: %s\n", err)
+			logging.Logger.Error("Scanning error", "error", err)
 		}
 
 		// Parse JSON RPC Message here and get method
@@ -130,11 +129,11 @@ func (s *Server) Loop(ctx context.Context, end chan<- error) {
 			break
 		}
 		if err != nil {
-			logging.Logger.Printf("Got error while parsing message: %s\n", err)
+			logging.Logger.Error("Parsing error", "error", err)
 			break
 		}
 
-		logging.Logger.Println("Got Method: " + method)
+		logging.Logger.Debug("Got Method: " + method)
 
 		// Validate Message (error if the client shouldn't be sending that method)
 		err = s.ValidateMethod(method)
@@ -153,14 +152,14 @@ func (s *Server) Loop(ctx context.Context, end chan<- error) {
 		}
 	}
 	if s.Status == ExitError {
-		err = errors.New("Exiting Ungracefully")
+		err = errors.New("exiting ungracefully")
 		end <- err
 	} else if s.Status == Exit {
 		end <- nil
 		return
 	}
 	if err == nil && s.Transport.Closed {
-		err = errors.New("Stream Closed: Got EOF")
+		err = errors.New("stream closed: got EOF")
 	} else {
 		s.Transport.Close()
 	}
@@ -190,7 +189,7 @@ func (s *Server) HandleMethod(ctx context.Context, method string, content []byte
 	if ok {
 		var m transport.RequestMessage
 		json.Unmarshal(content, &m)
-		logging.Logger.Printf("Got type of ID: %s\n", reflect.TypeOf(m.ID))
+		logging.Logger.Debug("Request ID", "type", reflect.TypeOf(m.ID), "value", m.ID)
 		if reflect.TypeOf(m.ID).String() == "float64" {
 			s.reqIdCtr = int(m.ID.(float64) + 1)
 		}
@@ -207,7 +206,7 @@ func (s *Server) HandleMethod(ctx context.Context, method string, content []byte
 		}
 		err = s.Transport.WriteResponse(m.ID, resp, responseError)
 		if err != nil {
-			logging.Logger.Println(err)
+			logging.Logger.Warn(err.Error())
 			return
 		}
 
@@ -221,7 +220,7 @@ func (s *Server) HandleMethod(ctx context.Context, method string, content []byte
 		// Send Request Message to appropriate Handler
 		err := handler2(ctx, s, m.Params)
 		if err != nil {
-			logging.Logger.Println(err)
+			logging.Logger.Warn(err.Error())
 			return
 		}
 	}
@@ -257,7 +256,7 @@ func TextDocumentSymbol(ctx context.Context, s *Server, par json.RawMessage) (js
 	}
 	f, ok := s.Files.Get(path)
 	if !ok {
-		return []byte{}, fmt.Errorf("Trying to get symbols from non-exist %s\n", path)
+		return []byte{}, fmt.Errorf("trying to get symbols from non-existent path: %s", path)
 	}
 	result := f.DocumentSymbols()
 

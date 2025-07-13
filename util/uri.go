@@ -15,13 +15,13 @@ type Path = string
 type Uri = string
 
 func Uri2path(uri string) (string, error) {
-	logging.Logger.Printf("Getting path for %s\n", uri)
+	logging.Logger.Info("Trying to parse URI", "uri", uri)
 	url, err := url.Parse(uri)
 	if err != nil {
 		return "", err
 	}
 	//	url.Path
-	logging.Logger.Printf("Parsed url as  %s\n", url)
+	logging.Logger.Info("Parsed url as path", "path", url)
 	if IsWindowsDriveURIPath(url.Path) {
 		url.Path = strings.ToUpper(string(url.Path[1])) + url.Path[2:]
 	}

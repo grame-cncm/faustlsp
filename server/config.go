@@ -63,6 +63,7 @@ func (c *FaustProjectConfig) UnmarshalJSON(content []byte) error {
 		CompilerDiagnostics: true,
 	}
 	if err := json.Unmarshal(content, &cfg); err != nil {
+		logging.Logger.Error("Failed to unmarshal FaustProjectConfig", "error", err)
 		return err
 	}
 	*c = FaustProjectConfig(cfg)
@@ -73,7 +74,7 @@ func (w *Workspace) parseConfig(content []byte) (FaustProjectConfig, error) {
 	var config FaustProjectConfig
 	err := json.Unmarshal(content, &config)
 	if err != nil {
-		logging.Logger.Printf("Invalid Project Config file: %s\n", err)
+		logging.Logger.Error("Invalid Project Config file", "error", err)
 		return FaustProjectConfig{}, err
 	}
 	// If no process files provided, all .dsp files become process
@@ -84,7 +85,7 @@ func (w *Workspace) parseConfig(content []byte) (FaustProjectConfig, error) {
 }
 
 func (w *Workspace) defaultConfig() FaustProjectConfig {
-	logging.Logger.Printf("Using default config file\n")
+	logging.Logger.Info("Using default config file")
 	var config = FaustProjectConfig{
 		Command:             "faust",
 		Type:                "process",

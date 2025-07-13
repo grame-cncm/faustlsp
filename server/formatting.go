@@ -35,7 +35,7 @@ func Format(content []byte, indent string) ([]byte, error) {
 	// Run faustfmt command
 	err = cmd.Run()
 	if err != nil {
-		return []byte{}, errors.New(fmt.Sprintf("%s, Stderr: %s\n", err, errs.String()))
+		return []byte{}, fmt.Errorf("faustfmt error: %s, Stderr: %s", err, errs.String())
 	}
 
 	return output.Bytes(), nil
@@ -57,10 +57,10 @@ func Formatting(ctx context.Context, s *Server, par json.RawMessage) (json.RawMe
 	var params transport.DocumentFormattingParams
 	json.Unmarshal(par, &params)
 
-	logging.Logger.Printf("Formatting for %s\n", string(par))
+	logging.Logger.Info("Formatting request", "params", string(par))
 	path, err := util.Uri2path(string(params.TextDocument.URI))
 	if err != nil {
-		logging.Logger.Print(err)
+		logging.Logger.Error("Uri2path error", "error", err)
 	}
 
 	f, ok := s.Files.Get(path)
@@ -69,17 +69,17 @@ func Formatting(ctx context.Context, s *Server, par json.RawMessage) (json.RawMe
 	if ok {
 		output, err = Format(content, GetIndent(params))
 		if err != nil {
-			logging.Logger.Print(err)
+			logging.Logger.Error("Format error", "error", err)
 		}
 	}
-	logging.Logger.Printf("Got this for formatting: '%s'", string(output))
+	logging.Logger.Info("Got this for formatting", "output", string(output))
 
 	endPos := transport.Position{Line: 0, Character: 0}
 	if ok {
-		endOffset := getDocumentEndOffset(string(content), string(s.Files.encoding))
+		endOffset := uint(len(content))
 		endPos, err = OffsetToPosition(endOffset, string(content), string(s.Files.encoding))
 		if err != nil {
-			logging.Logger.Print(err)
+			logging.Logger.Error("OffsetToPosition error", "error", err)
 			endPos = transport.Position{Line: 0, Character: 0}
 		}
 	}

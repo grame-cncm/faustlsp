@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/carn181/faustlsp/logging"
 	"github.com/carn181/faustlsp/server"
 	"github.com/carn181/faustlsp/transport"
@@ -13,7 +14,7 @@ import (
 
 func TestExitWithoutError(t *testing.T) {
 	logging.Init()
-	logging.Logger.Println("Starting")
+	logging.Logger.Info("Starting")
 	var s server.Server
 
 	runserver := func() error {
@@ -49,7 +50,7 @@ func TestExitWithoutError(t *testing.T) {
 
 func TestExitWithError(t *testing.T) {
 	logging.Init()
-	logging.Logger.Println("Starting")
+	logging.Logger.Info("Starting")
 
 	var s server.Server
 	ctx, cancel := context.WithCancel(context.Background())

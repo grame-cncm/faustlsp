@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -16,10 +17,27 @@ import (
 
 const faustConfigFile = ".faustcfg.json"
 
+type WorkspaceFiles map[util.Path]*File
+
+func (w WorkspaceFiles) LogValue() slog.Value {
+	files := make([]any, 0, len(w))
+	for key, value := range w {
+		// Extract the File's LogValue to use its structured logging format
+		fileValue := value.LogValue()
+		// Since File.LogValue() now returns an AnyValue with a map,
+		// we need to handle it differently
+		files = append(files, map[string]any{
+			"path": key,
+			"file": fileValue.Any(),
+		})
+	}
+	return slog.AnyValue(files)
+}
+
 type Workspace struct {
 	// Path to Root Directory of Workspace
 	Root     string
-	Files    map[util.Path]*File
+	Files    WorkspaceFiles
 	mu       sync.Mutex
 	TDEvents chan TDEvent
 	config   FaustProjectConfig
@@ -46,14 +64,14 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 	workspace.TDEvents = make(chan TDEvent)
 
 	// Replicate Workspace in our Temp Dir by copying
-	logging.Logger.Printf("Current workspace root path: %s\n", workspace.Root)
+	logging.Logger.Info("Current workspace root", "path", workspace.Root)
 	folder := filepath.Base(workspace.Root)
 	tempWorkspacePath := filepath.Join(s.tempDir, folder)
 	err := cp.Copy(workspace.Root, tempWorkspacePath)
 	if err != nil {
-		logging.Logger.Printf("Error in copying file: %s\n", err)
+		logging.Logger.Error("Copying file error", "error", err)
 	}
-	logging.Logger.Printf("Replicating Workspace in %s\n", tempWorkspacePath)
+	logging.Logger.Info("Replicating Workspace in ", "path", tempWorkspacePath)
 
 	// Open the files in file store
 	err = filepath.Walk(workspace.Root, func(path string, info os.FileInfo, err error) error {
@@ -67,7 +85,7 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 			workspaceFolderName := filepath.Base(workspace.Root)
 			tempDirFilePath := filepath.Join(s.tempDir, workspaceFolderName, relPath)
 			if !ok {
-				logging.Logger.Printf("Opening file from workspace: %s\n", path)
+				logging.Logger.Info("Opening file from workspace\n", "path", path)
 				s.Files.OpenFromPath(path, workspace.Root, false, "", tempDirFilePath)
 				workspace.addFileFromFileStore(path, s)
 				workspace.DiagnoseFile(path, s)
@@ -79,11 +97,11 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 	// Parse Config File
 	workspace.loadConfigFiles(s)
 
-	logging.Logger.Printf("Workspace Files: %v\n", workspace.Files)
-	logging.Logger.Printf("File Store: %s\n", s.Files.String())
+	logging.Logger.Info("Workspace Files", "files", workspace.Files)
+	logging.Logger.Info("File Store", "files", s.Files.String())
 
 	go func() { workspace.StartTrackingChanges(ctx, s) }()
-	logging.Logger.Printf("Started workspace watcher\n")
+	logging.Logger.Info("Started workspace watcher\n")
 }
 
 func (workspace *Workspace) loadConfigFiles(s *Server) {
@@ -99,7 +117,7 @@ func (workspace *Workspace) loadConfigFiles(s *Server) {
 		cfg = workspace.defaultConfig()
 	}
 	workspace.config = cfg
-	logging.Logger.Printf("Config File: %+v\n", cfg)
+	logging.Logger.Info("Workspace Config", "config", cfg)
 }
 
 // Track and Replicate Changes to workspace
@@ -116,7 +134,7 @@ func (workspace *Workspace) StartTrackingChanges(ctx context.Context, s *Server)
 	// File Paths -> Content{Get from disk, Get from text document changes} -> Replicate in Disk TempDir -> ParseSymbols/Get Diagnostics from TempDir and Memory
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		logging.Logger.Fatal(err)
+		logging.Logger.Error("Error in starting watcher", "error", err)
 	}
 
 	// Recursively add directories to watchlist
@@ -126,7 +144,7 @@ func (workspace *Workspace) StartTrackingChanges(ctx context.Context, s *Server)
 		}
 		if info.IsDir() {
 			watcher.Add(path)
-			logging.Logger.Printf("Watching %s in workspace %s\n", path, workspace.Root)
+			logging.Logger.Info("Watching %s in workspace %s\n", path, workspace.Root)
 		}
 		return nil
 	})
@@ -136,11 +154,11 @@ func (workspace *Workspace) StartTrackingChanges(ctx context.Context, s *Server)
 		// Editor TextDocument Events
 		// Assumes Method Handler has handled this event and has this file in Files Store
 		case change := <-workspace.TDEvents:
-			logging.Logger.Printf("Handling TD Event: %v\n", change)
+			logging.Logger.Info("Handling TD Event", "event", change)
 			workspace.HandleEditorEvent(change, s)
 		// Disk Events
 		case event, ok := <-watcher.Events:
-			logging.Logger.Printf("Handling Workspace Disk Event: %s\n", event)
+			logging.Logger.Info("Handling Workspace Disk Event", "event", event)
 			if !ok {
 				return
 			}
@@ -163,7 +181,7 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 	origPath, err := filepath.Localize(event.Name)
 
 	if err != nil {
-		logging.Logger.Printf("Localizing error: %s\n", err)
+		logging.Logger.Error("Localizing error", "error", err)
 		origPath = event.Name
 	}
 
@@ -218,7 +236,7 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 				// Create File
 				f, err := os.Create(tempDirFilePath)
 				if err != nil {
-					logging.Logger.Printf("CREATE FILE ERROR: %s\n", err)
+					logging.Logger.Error("Create File error", "error", err)
 				}
 				f.Chmod(fi.Mode())
 				f.Close()
@@ -277,7 +295,7 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 
 	file, ok := s.Files.Get(origFilePath)
 	if !ok {
-		logging.Logger.Fatalf("File %s should've been in File Store.", origFilePath)
+		logging.Logger.Error("File should've been in File Store.", "path", origFilePath)
 	}
 
 	workspaceFolderName := filepath.Base(workspace.Root)
@@ -289,7 +307,7 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 			err := os.MkdirAll(dirPath, 0755) // Create the directory and all parent directories with permissions 0755
 			if err != nil {
-				logging.Logger.Fatalf("failed to create directory: %s", err)
+				logging.Logger.Error("failed to create directory", "error", err)
 				break
 			}
 		}
@@ -297,12 +315,12 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 		// Create File in Temporary Directory. This creates an empty file at the temp path.
 		f, err := os.Create(tempDirFilePath)
 		if err != nil {
-			logging.Logger.Fatal(err)
+			logging.Logger.Error("OS create error", "error", err)
 		}
 		f.Close()
 	case TDChange:
 		// Write File to Temporary Directory. Updates the temporary file with the latest content from the editor.
-		logging.Logger.Printf("Writing recent change to %s\n", tempDirFilePath)
+		logging.Logger.Info("Writing recent change to", "path", tempDirFilePath)
 		os.WriteFile(tempDirFilePath, file.Content, fs.FileMode(os.O_TRUNC)) // Write the file content to the temp file, overwriting existing content
 		workspace.DiagnoseFile(origFilePath, s)
 	case TDClose:

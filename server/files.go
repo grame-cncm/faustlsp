@@ -3,17 +3,17 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+
+	"sync"
+	"unicode/utf8"
 
 	"github.com/carn181/faustlsp/logging"
 	"github.com/carn181/faustlsp/parser"
 	"github.com/carn181/faustlsp/transport"
 	"github.com/carn181/faustlsp/util"
-
-	//	"strings"
-	"sync"
-	"unicode/utf8"
 
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -29,6 +29,17 @@ type File struct {
 	// To avoid freeing null tree in C
 	treeCreated     bool
 	hasSyntaxErrors bool
+}
+
+func (f *File) LogValue() slog.Value {
+	// Create a map with all file attributes
+	fileAttrs := map[string]any{
+		"URI":      f.URI,
+		"Path":     f.Path,
+		"RelPath":  f.RelPath,
+		"TempPath": f.TempPath,
+	}
+	return slog.AnyValue(fileAttrs)
 }
 
 func (f *File) DocumentSymbols() []transport.DocumentSymbol {
@@ -70,7 +81,7 @@ func (files *Files) Init(context context.Context, encoding transport.PositionEnc
 func (files *Files) OpenFromURI(uri util.Uri, root util.Path, editorOpen bool, temp util.Path) {
 	path, err := util.Uri2path(uri)
 	if err != nil {
-		logging.Logger.Println(err)
+		logging.Logger.Error("OpenFromURI error", "error", err)
 		return
 	}
 	files.OpenFromPath(path, root, editorOpen, uri, temp)
@@ -83,7 +94,7 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 	_, ok := files.Get(path)
 	// If File already in store, ignore
 	if ok {
-		//		logging.Logger.Printf("File already in store with contents: %s\n", f.Content)
+		logging.Logger.Info("File already in store", "path", path)
 		return
 	}
 
@@ -94,13 +105,13 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 		// +1 for / delimeter for only relative path
 		relPath = path[size+1:]
 	}
-	logging.Logger.Printf("Reading contents of file %s\n", path)
+	logging.Logger.Info("Reading contents of file", "path", path)
 
 	content, err := os.ReadFile(path)
 
 	if err != nil {
 		if os.IsNotExist(err) {
-			logging.Logger.Println("Invalid Path " + err.Error())
+			logging.Logger.Error("Invalid Path", "error", err)
 		}
 	}
 
@@ -158,7 +169,8 @@ func (files *Files) ModifyFull(path util.Path, content string) {
 	files.mu.Lock()
 	f, ok := files.fs[path]
 	if !ok {
-		logging.Logger.Printf("error: file to modify not in file store (%s)\n", path)
+		logging.Logger.Error("file to modify not in file store", "path", path)
+		files.mu.Unlock()
 		return
 	}
 
@@ -169,7 +181,7 @@ func (files *Files) ModifyFull(path util.Path, content string) {
 		if f.treeCreated {
 			//			f.Tree.Close()
 		}
-		//		logging.Logger.Printf("Trying to parse %s\n", f.Content)
+		//		logging.Logger.Info("Trying to parse file", "content", f.Content)
 		//		f.Tree = parser.ParseTree(f.Content)
 		//		f.treeCreated = true
 	}
@@ -177,15 +189,16 @@ func (files *Files) ModifyFull(path util.Path, content string) {
 }
 
 func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Range, content string) {
-	logging.Logger.Printf("Applying Incremental Change to %s\n", path)
+	logging.Logger.Info("Applying Incremental Change", "path", path)
 	files.mu.Lock()
 	f, ok := files.fs[path]
 	if !ok {
-		logging.Logger.Printf("error: file to modify not in file store (%s)\n", path)
+		logging.Logger.Error("file to modify not in file store", "path", path)
+		files.mu.Unlock()
 		return
 	}
 	result := ApplyIncrementalChange(changeRange, content, string(f.Content), string(files.encoding))
-	//	logging.Logger.Printf("Before:\n%s\nAfter:\n%s\n", string(f.Content), result)
+	//	logging.Logger.Info("Before/After Incremental Change", "before", string(f.Content), "after", result)
 	f.Content = []byte(result)
 
 	ext := filepath.Ext(path)
@@ -193,7 +206,7 @@ func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Rang
 		if f.treeCreated {
 			//			f.Tree.Close()
 		}
-		//		logging.Logger.Printf("Trying to parse %s\n", f.Content)
+		//		logging.Logger.Info("Trying to parse file", "content", f.Content)
 		//		f.Tree = parser.ParseTree(f.Content)
 		//		f.treeCreated = true
 	}
@@ -308,7 +321,7 @@ func getDocumentEndOffset(s string, encoding string) uint {
 func (files *Files) CloseFromURI(uri util.Uri) {
 	path, err := util.Uri2path(uri)
 	if err != nil {
-		logging.Logger.Println(err)
+		logging.Logger.Error("CloseFromURI error", "error", err)
 		return
 	}
 	files.Close(path)
@@ -318,7 +331,8 @@ func (files *Files) Close(path util.Path) {
 	files.mu.Lock()
 	f, ok := files.fs[path]
 	if !ok {
-		logging.Logger.Printf("error: file to close not in file store (%s)\n", path)
+		logging.Logger.Error("file to close not in file store", "path", path)
+		files.mu.Unlock()
 		return
 	}
 	f.Open = false

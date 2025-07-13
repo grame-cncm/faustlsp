@@ -17,7 +17,7 @@ func Initialize(ctx context.Context, s *Server, par json.RawMessage) (json.RawMe
 	s.Status = Initializing
 	var params transport.InitializeParams
 	json.Unmarshal(par, &params)
-	logging.Logger.Println(string(par))
+	logging.Logger.Info("Got Initialize Parameters from Client", "params", par)
 
 	// TODO: Choose ServerCapabilities based on ClientCapabilities
 	// Server Capabilities
@@ -50,7 +50,7 @@ func Initialize(ctx context.Context, s *Server, par json.RawMessage) (json.RawMe
 	s.Capabilities = result.Capabilities
 
 	rootPath, _ := util.Uri2path(string(params.RootURI))
-	logging.Logger.Printf("Workspace: %v\n", rootPath)
+	logging.Logger.Info("Got workspace", "workspace", rootPath)
 	s.Workspace.Root = rootPath
 
 	resultBytes, err := json.Marshal(result)
@@ -67,8 +67,8 @@ func Initialized(ctx context.Context, s *Server, par json.RawMessage) error {
 	go s.GenerateDiagnostics()
 	s.Files.Init(ctx, *s.Capabilities.PositionEncoding)
 	s.Workspace.Init(ctx, s)
-	logging.Logger.Println("Handling Initialized with diagnostics")
-	logging.Logger.Println("Started Diagnostic Handler")
+	logging.Logger.Info("Handling Initialized with diagnostics")
+	logging.Logger.Info("Started Diagnostic Handler")
 	// Send WorkspaceFolders Request
 	// TODO: Do this only if server-client agreed on workspacefolders
 	//	err := s.Transport.WriteRequest(s.reqIdCtr,"workspace/workspaceFolders", []byte{})

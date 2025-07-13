@@ -1,14 +1,14 @@
 package logging
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 )
 
 // Logger is the global logger instance.
-var Logger *log.Logger
+var Logger *slog.Logger
 
 // Init initializes the logger with a file output.
 func Init() {
@@ -28,5 +28,8 @@ func Init() {
 	}
 
 	// Initialize the logger to write to the file, without flags or prefixes.
-	Logger = log.New(f, "faust-lsp: ", log.Ltime)
+	//	Logger = log.New(f, "faust-lsp: ", log.Ltime)
+	Logger = slog.New(slog.NewJSONHandler(f, &slog.HandlerOptions{
+		AddSource: true,
+	}))
 }
