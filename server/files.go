@@ -282,6 +282,29 @@ func GetLineIndices(s string) []uint {
 	return lines
 }
 
+func getDocumentEndOffset(s string, encoding string) uint {
+	switch encoding {
+	case "utf-8":
+		return uint(len(s))
+	case "utf-16":
+		offset := uint(0)
+		for _, r := range s {
+			if r >= 0x10000 {
+				offset += 2
+			} else {
+				offset += 1
+			}
+		}
+		return offset
+	case "utf-32":
+		// Each rune is one code unit in utf-32
+		return uint(len([]rune(s)))
+	default:
+		// Fallback to utf-8
+		return uint(len(s))
+	}
+}
+
 func (files *Files) CloseFromURI(uri util.Uri) {
 	path, err := util.Uri2path(uri)
 	if err != nil {
@@ -320,9 +343,9 @@ func (files *Files) Remove(path util.Path) {
 
 func (files *Files) String() string {
 	str := ""
-	for path, f := range files.fs {
+	for path, _ := range files.fs {
 		if IsFaustFile(path) {
-			str += fmt.Sprintf("%s\n %s\n", path, string(f.Content))
+			str += fmt.Sprintf("Files has %s\n", path)
 		}
 	}
 	return str

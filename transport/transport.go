@@ -95,7 +95,15 @@ func (t *Transport) Read() ([]byte, error) {
 			t.Closed = true
 		}
 	}
-	return t.Scanner.Bytes(), t.Scanner.Err()
+
+	rawMessage := t.Scanner.Bytes()
+	err := t.Scanner.Err()
+	if err != nil {
+		return rawMessage, err
+	}
+
+	_, content, _ := bytes.Cut(rawMessage, []byte{'\r', '\n', '\r', '\n'})
+	return content, nil
 }
 
 // Writes JSON RPC message
@@ -122,13 +130,31 @@ func (t *Transport) WriteNotif(method string, params json.RawMessage) error {
 }
 
 // Writes JSON RPC Request Message
-func (t *Transport) WriteRequest(id interface{}, method string, params json.RawMessage) error {
+func (t *Transport) WriteRequest(id any, method string, params json.RawMessage) error {
 	msg, err := json.Marshal(
 		RequestMessage{
 			Message: Message{Jsonrpc: "2.0"},
 			ID:      id,
 			Method:  method,
 			Params:  params,
+		})
+	if err != nil {
+		return err
+	}
+
+	logging.Logger.Println("Writing " + string(msg))
+	err = t.Write(msg)
+	return err
+}
+
+// Writes JSON RPC Response Message
+func (t *Transport) WriteResponse(id any, response json.RawMessage, responseError *ResponseError) error {
+	msg, err := json.Marshal(
+		ResponseMessage{
+			Message: Message{Jsonrpc: "2.0"},
+			ID:      id,
+			Result:  response,
+			Error:   responseError,
 		})
 	if err != nil {
 		return err
@@ -174,12 +200,8 @@ func split(data []byte, _ bool) (advance int, token []byte, err error) {
 	return totalLength, data[:totalLength], nil
 }
 
-func GetMethod(message []byte) (method string, error error) {
+func GetMethod(content []byte) (string, error) {
 	var msg RPCMessage
-	_, content, found := bytes.Cut(message, []byte{'\r', '\n', '\r', '\n'})
-	if !found {
-		return "", nil
-	}
 
 	err := json.Unmarshal(content, &msg)
 	return msg.Method, err

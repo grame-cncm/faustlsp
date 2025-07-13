@@ -1,13 +1,15 @@
 package tests
 
 import (
-	"faustlsp/util"
 	"fmt"
 	"runtime"
 	"testing"
+
+	"github.com/carn181/faustlsp/util"
 )
 
 func TestUri2path(t *testing.T) {
+
 	if runtime.GOOS != "windows" {
 		path, _ := util.Uri2path("file:///home/user/a.dsp")
 		if !(path == "/home/user/a.dsp") {

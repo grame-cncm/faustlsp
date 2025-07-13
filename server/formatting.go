@@ -53,7 +53,7 @@ func GetIndent(par transport.DocumentFormattingParams) string {
 	}
 }
 
-func Formatting(ctx context.Context, s *Server, id any, par json.RawMessage) (json.RawMessage, error) {
+func Formatting(ctx context.Context, s *Server, par json.RawMessage) (json.RawMessage, error) {
 	var params transport.DocumentFormattingParams
 	json.Unmarshal(par, &params)
 
@@ -74,27 +74,24 @@ func Formatting(ctx context.Context, s *Server, id any, par json.RawMessage) (js
 	}
 	logging.Logger.Printf("Got this for formatting: '%s'", string(output))
 
-	end, err := OffsetToPosition(uint(len(content)),
-		string(content),
-		string(s.Files.encoding))
-	if err != nil {
-		logging.Logger.Println(err)
+	endPos := transport.Position{Line: 0, Character: 0}
+	if ok {
+		endOffset := getDocumentEndOffset(string(content), string(s.Files.encoding))
+		endPos, err = OffsetToPosition(endOffset, string(content), string(s.Files.encoding))
+		if err != nil {
+			logging.Logger.Print(err)
+			endPos = transport.Position{Line: 0, Character: 0}
+		}
 	}
+
 	edit := transport.TextEdit{
 		Range: transport.Range{
 			Start: transport.Position{Line: 0, Character: 0},
-			End:   end,
+			End:   endPos,
 		},
 		NewText: string(output),
 	}
-	resultBytes, _ := json.Marshal([]transport.TextEdit{edit})
+	resultBytes, err := json.Marshal([]transport.TextEdit{edit})
 
-	var resp transport.ResponseMessage = transport.ResponseMessage{
-		Message: transport.Message{Jsonrpc: "2.0"},
-		ID:      id,
-		Result:  resultBytes,
-	}
-
-	msg, err := json.Marshal(resp)
-	return msg, err
+	return resultBytes, err
 }

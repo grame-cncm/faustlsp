@@ -16,14 +16,14 @@ type RPCMessage struct {
 
 type RequestMessage struct {
 	Message
-	ID     interface{}     `json:"id"`
+	ID     any             `json:"id"`
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params,omitempty"`
 }
 
 type ResponseMessage struct {
 	Message
-	ID     interface{}     `json:"id"`
+	ID     any             `json:"id"`
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  *ResponseError  `json:"error,omitempty"`
 }

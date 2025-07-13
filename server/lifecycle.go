@@ -11,11 +11,10 @@ import (
 )
 
 // Initialize Handler
-func Initialize(ctx context.Context, s *Server, id any, par json.RawMessage) (json.RawMessage, error) {
+func Initialize(ctx context.Context, s *Server, par json.RawMessage) (json.RawMessage, error) {
 	// TODO: Error Handling
 
 	s.Status = Initializing
-	logging.Logger.Printf("Handling Initialize(id: %v)", id)
 	var params transport.InitializeParams
 	json.Unmarshal(par, &params)
 	logging.Logger.Println(string(par))
@@ -58,13 +57,7 @@ func Initialize(ctx context.Context, s *Server, id any, par json.RawMessage) (js
 	if err != nil {
 		return []byte{}, nil
 	}
-	var resp transport.ResponseMessage = transport.ResponseMessage{
-		Message: transport.Message{Jsonrpc: "2.0"},
-		ID:      id,
-		Result:  resultBytes,
-	}
-	msg, err := json.Marshal(resp)
-	return msg, err
+	return resultBytes, err
 }
 
 // Initialized Handler
@@ -87,18 +80,13 @@ func Initialized(ctx context.Context, s *Server, par json.RawMessage) error {
 }
 
 // Shutdown Handler
-func ShutdownEnd(ctx context.Context, s *Server, id any, par json.RawMessage) (json.RawMessage, error) {
+func ShutdownEnd(ctx context.Context, s *Server, par json.RawMessage) (json.RawMessage, error) {
 	s.Status = Shutdown
-	var result = transport.ResponseMessage{
-		Message: transport.Message{Jsonrpc: "2.0"},
-		ID:      id,
-		Result:  []byte("{}"),
-	}
 	// Some Clients end the server right after sending shutdown like emacs lsp-mode
 	// Remove Temp Dir just in case
 	os.RemoveAll(s.tempDir)
 
-	content, err := json.Marshal(result)
+	content, err := json.Marshal([]byte(""))
 	return content, err
 }
 

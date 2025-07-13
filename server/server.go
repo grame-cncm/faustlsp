@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -185,10 +184,8 @@ func (s *Server) ValidateMethod(method string) error {
 }
 
 // Main Handle Method
-func (s *Server) HandleMethod(ctx context.Context, method string, message []byte) {
+func (s *Server) HandleMethod(ctx context.Context, method string, content []byte) {
 	// TODO: Receive only content, no Header
-	_, content, _ := bytes.Cut(message, []byte{'\r', '\n', '\r', '\n'})
-
 	handler, ok := requestHandlers[method]
 	if ok {
 		var m transport.RequestMessage
@@ -197,19 +194,23 @@ func (s *Server) HandleMethod(ctx context.Context, method string, message []byte
 		if reflect.TypeOf(m.ID).String() == "float64" {
 			s.reqIdCtr = int(m.ID.(float64) + 1)
 		}
-		resp, err := handler(ctx, s, m.ID, m.Params)
+
+		// Main handle method for request and get response
+		resp, err := handler(ctx, s, m.Params)
+
+		var responseError *transport.ResponseError
+		if err != nil {
+			responseError = &transport.ResponseError{
+				Code:    int(transport.InternalError),
+				Message: err.Error(),
+			}
+		}
+		err = s.Transport.WriteResponse(m.ID, resp, responseError)
 		if err != nil {
 			logging.Logger.Println(err)
 			return
 		}
 
-		if len(resp) != 0 {
-			logging.Logger.Printf("Writing %s\n", resp)
-			err = s.Transport.Write(resp)
-			if err != nil {
-				logging.Logger.Println(err)
-			}
-		}
 		return
 	}
 	handler2, ok := notificationHandlers[method]
@@ -228,7 +229,7 @@ func (s *Server) HandleMethod(ctx context.Context, method string, message []byte
 }
 
 // Map from method to method handler for request methods
-var requestHandlers = map[string]func(context.Context, *Server, interface{}, json.RawMessage) (json.RawMessage, error){
+var requestHandlers = map[string]func(context.Context, *Server, json.RawMessage) (json.RawMessage, error){
 	"initialize":                  Initialize,
 	"textDocument/documentSymbol": TextDocumentSymbol,
 	"textDocument/formatting":     Formatting,
@@ -245,7 +246,7 @@ var notificationHandlers = map[string]func(context.Context, *Server, json.RawMes
 	"exit": ExitEnd,
 }
 
-func TextDocumentSymbol(ctx context.Context, s *Server, id interface{}, par json.RawMessage) (json.RawMessage, error) {
+func TextDocumentSymbol(ctx context.Context, s *Server, par json.RawMessage) (json.RawMessage, error) {
 	var params transport.DocumentSymbolParams
 	json.Unmarshal(par, &params)
 
@@ -261,15 +262,6 @@ func TextDocumentSymbol(ctx context.Context, s *Server, id interface{}, par json
 	result := f.DocumentSymbols()
 
 	resultBytes, err := json.Marshal(result)
-	//	logging.Logger.Println(string(resultBytes))
-	if err != nil {
-		return []byte{}, nil
-	}
-	var resp transport.ResponseMessage = transport.ResponseMessage{
-		Message: transport.Message{Jsonrpc: "2.0"},
-		ID:      id,
-		Result:  resultBytes,
-	}
-	msg, err := json.Marshal(resp)
-	return msg, err
+
+	return resultBytes, err
 }

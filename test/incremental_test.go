@@ -346,22 +346,167 @@ func testIncremental(t IncrementalTest) error {
 	return nil
 }
 
-func TestOffset2Position(t *testing.T) {
-	testStr := `import("stdfaust.lib");
-process = os.osc(400);
-
-
-h = a
-with {
-
-};;
-`
-	//	testStr2 := "import(\"stdfaust.lib\");\nprocess = os.osc(400);\n\nh = a\n    with {\n    };\n\n"
-	itests := []IncrementalTest{
-		{testStr, transport.Position{0, 0}, 0},
-		{testStr, transport.Position{8, 0}, uint(len(testStr))},
+func TestApplyIncrementalChange(t *testing.T) {
+	tests := []struct {
+		name        string
+		original    string
+		changeRange transport.Range
+		newText     string
+		encoding    string
+		want        string
+	}{
+		{
+			name:        "Replace middle of line",
+			original:    "abcdef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 2}, End: transport.Position{Line: 0, Character: 4}},
+			newText:     "XY",
+			encoding:    "utf-16",
+			want:        "abXYef",
+		},
+		{
+			name:        "Insert at start",
+			original:    "abcdef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 0}, End: transport.Position{Line: 0, Character: 0}},
+			newText:     "123",
+			encoding:    "utf-16",
+			want:        "123abcdef",
+		},
+		{
+			name:        "Insert at end",
+			original:    "abcdef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 6}, End: transport.Position{Line: 0, Character: 6}},
+			newText:     "XYZ",
+			encoding:    "utf-16",
+			want:        "abcdefXYZ",
+		},
+		{
+			name:        "Delete range",
+			original:    "abcdef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 2}, End: transport.Position{Line: 0, Character: 5}},
+			newText:     "",
+			encoding:    "utf-16",
+			want:        "abf",
+		},
+		{
+			name:        "Replace whole document",
+			original:    "abcdef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 0}, End: transport.Position{Line: 0, Character: 6}},
+			newText:     "xyz",
+			encoding:    "utf-16",
+			want:        "xyz",
+		},
+		{
+			name:        "Undo: revert to previous state",
+			original:    "abXYef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 2}, End: transport.Position{Line: 0, Character: 4}},
+			newText:     "cd",
+			encoding:    "utf-16",
+			want:        "abcdef",
+		},
+		{
+			name:        "Out of bounds range (end too large)",
+			original:    "abcdef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 4}, End: transport.Position{Line: 0, Character: 100}},
+			newText:     "ZZ",
+			encoding:    "utf-16",
+			want:        "abcdZZ",
+		},
+		{
+			name:        "Multi-line replace",
+			original:    "abc\ndef\nghi",
+			changeRange: transport.Range{Start: transport.Position{Line: 1, Character: 0}, End: transport.Position{Line: 2, Character: 3}},
+			newText:     "XYZ",
+			encoding:    "utf-16",
+			want:        "abc\nXYZ",
+		},
+		{
+			name:        "Insert newline",
+			original:    "abc\ndef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 3}, End: transport.Position{Line: 0, Character: 3}},
+			newText:     "\n",
+			encoding:    "utf-16",
+			want:        "abc\n\ndef",
+		},
+		{
+			name:        "Undo: insert then remove",
+			original:    "abc\n\ndef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 3}, End: transport.Position{Line: 1, Character: 0}},
+			newText:     "",
+			encoding:    "utf-16",
+			want:        "abc\ndef",
+		},
+		{
+			name:        "Insert at empty document",
+			original:    "",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 0}, End: transport.Position{Line: 0, Character: 0}},
+			newText:     "hello",
+			encoding:    "utf-16",
+			want:        "hello",
+		},
+		{
+			name:        "Replace with empty string (delete all)",
+			original:    "abcdef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 0}, End: transport.Position{Line: 0, Character: 6}},
+			newText:     "",
+			encoding:    "utf-16",
+			want:        "",
+		},
+		{
+			name:        "Insert at end of multi-line document",
+			original:    "abc\ndef\nghi",
+			changeRange: transport.Range{Start: transport.Position{Line: 2, Character: 3}, End: transport.Position{Line: 2, Character: 3}},
+			newText:     "XYZ",
+			encoding:    "utf-16",
+			want:        "abc\ndef\nghiXYZ",
+		},
+		{
+			name:        "Replace across multiple lines with longer text",
+			original:    "abc\ndef\nghi",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 1}, End: transport.Position{Line: 2, Character: 2}},
+			newText:     "LONGREPLACEMENT",
+			encoding:    "utf-16",
+			want:        "aLONGREPLACEMENTi",
+		},
+		{
+			name:        "Insert unicode emoji",
+			original:    "abc",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 1}, End: transport.Position{Line: 0, Character: 1}},
+			newText:     "💚",
+			encoding:    "utf-16",
+			want:        "a💚bc",
+		},
+		{
+			name:        "Replace with only newlines",
+			original:    "abc\ndef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 0}, End: transport.Position{Line: 1, Character: 3}},
+			newText:     "\n\n\n",
+			encoding:    "utf-16",
+			want:        "\n\n\n",
+		},
+		{
+			name:        "Insert at very large character index",
+			original:    "abc",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 1000}, End: transport.Position{Line: 0, Character: 1000}},
+			newText:     "XYZ",
+			encoding:    "utf-16",
+			want:        "abcXYZ",
+		},
+		{
+			name:        "Replace with multi-line text",
+			original:    "abc\ndef",
+			changeRange: transport.Range{Start: transport.Position{Line: 0, Character: 1}, End: transport.Position{Line: 1, Character: 2}},
+			newText:     "1\n2\n3",
+			encoding:    "utf-16",
+			want:        "a1\n2\n3f",
+		},
 	}
-	for _, test := range itests {
-		t.Log(fmt.Sprint(testIncremental(test)))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := server.ApplyIncrementalChange(tt.changeRange, tt.newText, tt.original, tt.encoding)
+			if got != tt.want {
+				t.Errorf("ApplyIncrementalChange() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
