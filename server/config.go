@@ -11,19 +11,12 @@ import (
 
 type FaustProjectConfig struct {
 	Command             string      `json:"command,omitempty"`
-	Type                string      `json:"type"` // Actually make this enum between Process or Library
+	Type                string      `json:"type"` // Actually make this enum between Process or Library eventually
 	ProcessName         string      `json:"process_name,omitempty"`
 	ProcessFiles        []util.Path `json:"process_files,omitempty"`
 	IncludeDir          []util.Path `json:"include,omitempty"`
 	CompilerDiagnostics bool        `json:"compiler_diagnostics,omitempty"`
 }
-
-// Ideal behavior of config file
-// 1) No project config file => Every file has process called process
-// 2) Project config file in root => Project compiled from root dir and all files are relative to root dir
-// But what if there are multiple projects inside dirs ?
-// Answer: 3) Have them have their own project config file
-// Project config defined, but no processfile, all files are process
 
 func (w *Workspace) Rel2Abs(relPath string) util.Path {
 	return filepath.Join(w.Root, relPath)
@@ -43,11 +36,15 @@ func (w *Workspace) sendCompilerDiagnostics(s *Server) {
 		f, ok := s.Files.Get(path)
 		if ok {
 			if !f.hasSyntaxErrors {
+				var diagnosticErrors = []transport.Diagnostic{}
 				uri := util.Path2URI(path)
-				diagnosticErrors := getCompilerDiagnostics(filePath, w.Root, w.config)
+				diagnosticError := getCompilerDiagnostics(f.TempPath, w.Root, w.config)
+				if diagnosticError.Message != "" {
+					diagnosticErrors = []transport.Diagnostic{diagnosticError}
+				}
 				d := transport.PublishDiagnosticsParams{
 					URI:         transport.DocumentURI(uri),
-					Diagnostics: []transport.Diagnostic{diagnosticErrors},
+					Diagnostics: diagnosticErrors,
 				}
 				s.diagChan <- d
 			}

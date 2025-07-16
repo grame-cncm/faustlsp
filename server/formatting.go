@@ -76,8 +76,7 @@ func Formatting(ctx context.Context, s *Server, par json.RawMessage) (json.RawMe
 
 	endPos := transport.Position{Line: 0, Character: 0}
 	if ok {
-		endOffset := uint(len(content))
-		endPos, err = OffsetToPosition(endOffset, string(content), string(s.Files.encoding))
+		endPos, err = getDocumentEndPosition(string(content), string(s.Files.encoding))
 		if err != nil {
 			logging.Logger.Error("OffsetToPosition error", "error", err)
 			endPos = transport.Position{Line: 0, Character: 0}

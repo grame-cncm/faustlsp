@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"github.com/carn181/faustlsp/logging"
@@ -31,6 +32,7 @@ func (w WorkspaceFiles) LogValue() slog.Value {
 			"file": fileValue.Any(),
 		})
 	}
+
 	return slog.AnyValue(files)
 }
 
@@ -181,7 +183,9 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 	origPath, err := filepath.Localize(event.Name)
 
 	if err != nil {
-		logging.Logger.Error("Localizing error", "error", err)
+		if runtime.GOOS == "windows" {
+			logging.Logger.Error("Localizing error", "error", err)
+		}
 		origPath = event.Name
 	}
 
@@ -322,6 +326,8 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 		// Write File to Temporary Directory. Updates the temporary file with the latest content from the editor.
 		logging.Logger.Info("Writing recent change to", "path", tempDirFilePath)
 		os.WriteFile(tempDirFilePath, file.Content, fs.FileMode(os.O_TRUNC)) // Write the file content to the temp file, overwriting existing content
+		content, _ := os.ReadFile(tempDirFilePath)
+		logging.Logger.Info("Current state of file", "path", tempDirFilePath, "content", string(content))
 		workspace.DiagnoseFile(origFilePath, s)
 	case TDClose:
 		// Sync file from disk on close if it exists and replicate it to temporary directory, else remove from Files Store
@@ -353,9 +359,11 @@ func (w *Workspace) DiagnoseFile(path util.Path, s *Server) {
 		if params.URI != "" {
 			s.diagChan <- params
 		}
-		// Compiler Diagnostics if exists
-		if w.config.CompilerDiagnostics {
-			w.sendCompilerDiagnostics(s)
+		if len(params.Diagnostics) == 0 {
+			// Compiler Diagnostics if exists
+			if w.config.CompilerDiagnostics {
+				w.sendCompilerDiagnostics(s)
+			}
 		}
 	}
 }

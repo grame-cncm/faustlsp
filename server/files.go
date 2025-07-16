@@ -199,6 +199,8 @@ func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Rang
 	}
 	result := ApplyIncrementalChange(changeRange, content, string(f.Content), string(files.encoding))
 	//	logging.Logger.Info("Before/After Incremental Change", "before", string(f.Content), "after", result)
+	logging.Logger.Info("Incremental Change Parameters ", "range", changeRange, "content", content)
+	logging.Logger.Info("Before/After Incremental Change", "before", string(f.Content), "after", result)
 	f.Content = []byte(result)
 
 	ext := filepath.Ext(path)
@@ -318,6 +320,12 @@ func getDocumentEndOffset(s string, encoding string) uint {
 	}
 }
 
+func getDocumentEndPosition(s string, encoding string) (transport.Position, error) {
+	offset := getDocumentEndOffset(s, encoding)
+	pos, err := OffsetToPosition(offset, s, encoding)
+	return pos, err
+}
+
 func (files *Files) CloseFromURI(uri util.Uri) {
 	path, err := util.Uri2path(uri)
 	if err != nil {
@@ -357,7 +365,7 @@ func (files *Files) Remove(path util.Path) {
 
 func (files *Files) String() string {
 	str := ""
-	for path, _ := range files.fs {
+	for path := range files.fs {
 		if IsFaustFile(path) {
 			str += fmt.Sprintf("Files has %s\n", path)
 		}

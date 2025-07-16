@@ -19,7 +19,7 @@ func Init() {
 	os.Mkdir(faustTempDir, 0750)
 
 	currTime := time.Now().Format("15-04-05")
-	logFile := "log-" + currTime + ".txt"
+	logFile := "log-" + currTime + ".json"
 	logFilePath := filepath.Join(faustTempDir, logFile)
 
 	f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_RDWR, 0755)
