@@ -49,7 +49,7 @@ func Initialize(ctx context.Context, s *Server, par json.RawMessage) (json.RawMe
 	}
 	s.Capabilities = result.Capabilities
 
-	rootPath, _ := util.Uri2path(string(params.RootURI))
+	rootPath, _ := util.URI2path(string(params.RootURI))
 	logging.Logger.Info("Got workspace", "workspace", rootPath)
 	s.Workspace.Root = rootPath
 

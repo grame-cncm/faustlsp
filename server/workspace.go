@@ -75,6 +75,9 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 	}
 	logging.Logger.Info("Replicating Workspace in ", "path", tempWorkspacePath)
 
+	// Parse Config File
+	workspace.loadConfigFiles(s)
+
 	// Open the files in file store
 	err = filepath.Walk(workspace.Root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -82,22 +85,23 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 		}
 		if !info.IsDir() {
 			_, ok := s.Files.Get(path)
-			// Path relative to workspace
-			relPath := path[len(workspace.Root)+1:]
-			workspaceFolderName := filepath.Base(workspace.Root)
-			tempDirFilePath := filepath.Join(s.tempDir, workspaceFolderName, relPath)
+
 			if !ok {
+				// Path relative to workspace
+				relPath := path[len(workspace.Root)+1:]
+				workspaceFolderName := filepath.Base(workspace.Root)
+				tempDirFilePath := filepath.Join(s.tempDir, workspaceFolderName, relPath)
+
 				logging.Logger.Info("Opening file from workspace\n", "path", path)
+
 				s.Files.OpenFromPath(path, workspace.Root, false, "", tempDirFilePath)
 				workspace.addFileFromFileStore(path, s)
+				workspace.CreateImportTree(&s.Files, relPath, workspace.Root)
 				workspace.DiagnoseFile(path, s)
 			}
 		}
 		return nil
 	})
-
-	// Parse Config File
-	workspace.loadConfigFiles(s)
 
 	logging.Logger.Info("Workspace Files", "files", workspace.Files)
 	logging.Logger.Info("File Store", "files", s.Files.String())

@@ -19,13 +19,20 @@ import (
 )
 
 type File struct {
-	URI      util.Uri
-	Path     util.Path
+	URI    util.URI
+	Path   util.Path
+	handle util.Handle
+
 	RelPath  util.Path // Path relative to a workspace
 	TempPath util.Path // Path for temporary
-	Content  []byte
-	Open     bool
-	Tree     *tree_sitter.Tree
+
+	Syms    []*IdentifierSym
+	Imports []*File
+
+	Content []byte
+
+	Open bool
+	Tree *tree_sitter.Tree
 	// To avoid freeing null tree in C
 	treeCreated     bool
 	hasSyntaxErrors bool
@@ -33,15 +40,19 @@ type File struct {
 
 func (f *File) LogValue() slog.Value {
 	// Create a map with all file attributes
+	var imports = []util.Path{}
+	for _, imported := range f.Imports {
+		imports = append(imports, imported.Path)
+	}
 	fileAttrs := map[string]any{
 		"URI":      f.URI,
 		"Path":     f.Path,
 		"RelPath":  f.RelPath,
 		"TempPath": f.TempPath,
+		"Imports":  imports,
 	}
 	return slog.AnyValue(fileAttrs)
 }
-
 func (f *File) DocumentSymbols() []transport.DocumentSymbol {
 	// TODO: Find a way to have tree without having to worry about
 	t := parser.ParseTree(f.Content)
@@ -78,8 +89,8 @@ func (files *Files) Init(context context.Context, encoding transport.PositionEnc
 	files.encoding = encoding
 }
 
-func (files *Files) OpenFromURI(uri util.Uri, root util.Path, editorOpen bool, temp util.Path) {
-	path, err := util.Uri2path(uri)
+func (files *Files) OpenFromURI(uri util.URI, root util.Path, editorOpen bool, temp util.Path) {
+	path, err := util.URI2path(uri)
 	if err != nil {
 		logging.Logger.Error("OpenFromURI error", "error", err)
 		return
@@ -87,7 +98,7 @@ func (files *Files) OpenFromURI(uri util.Uri, root util.Path, editorOpen bool, t
 	files.OpenFromPath(path, root, editorOpen, uri, temp)
 }
 
-func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool, uri util.Uri, temp util.Path) {
+func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool, uri util.URI, temp util.Path) {
 	var file File
 
 	var relPath util.Path
@@ -112,6 +123,7 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 	if err != nil {
 		if os.IsNotExist(err) {
 			logging.Logger.Error("Invalid Path", "error", err)
+			return
 		}
 	}
 
@@ -326,8 +338,8 @@ func getDocumentEndPosition(s string, encoding string) (transport.Position, erro
 	return pos, err
 }
 
-func (files *Files) CloseFromURI(uri util.Uri) {
-	path, err := util.Uri2path(uri)
+func (files *Files) CloseFromURI(uri util.URI) {
+	path, err := util.URI2path(uri)
 	if err != nil {
 		logging.Logger.Error("CloseFromURI error", "error", err)
 		return

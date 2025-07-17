@@ -4,7 +4,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"runtime"
-
 	"strings"
 	"unicode"
 
@@ -12,9 +11,25 @@ import (
 )
 
 type Path = string
-type Uri = string
+type URI = string
 
-func Uri2path(uri string) (string, error) {
+type Handle struct {
+	URI  URI
+	Path Path
+}
+
+func FromPath(path string) Handle {
+	return Handle{Path2URI(path), path}
+}
+
+func FromURI(uri string) (Handle, error) {
+	path, err := URI2path(uri)
+	return Handle{uri, path}, err
+}
+
+// Converting functions
+
+func URI2path(uri string) (string, error) {
 	logging.Logger.Info("Trying to parse URI", "uri", uri)
 	url, err := url.Parse(uri)
 	if err != nil {
@@ -28,7 +43,7 @@ func Uri2path(uri string) (string, error) {
 	return filepath.FromSlash(url.Path), nil
 }
 
-func Path2URI(path string) Uri {
+func Path2URI(path string) URI {
 	scheme := "file://"
 	if runtime.GOOS == "windows" {
 		path = "/" + strings.Replace(path, "\\", "/", -1)

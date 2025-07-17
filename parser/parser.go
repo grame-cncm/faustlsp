@@ -5,13 +5,12 @@ import (
 	"sync"
 
 	. "github.com/carn181/faustlsp/transport"
+	"github.com/carn181/faustlsp/util"
 
 	tree_sitter_faust "github.com/khiner/tree-sitter-faust/bindings/go"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
-// TODO: Need mapping from LSP UTF-16 to TS UTF-8 and vice-versa
-// TODO: Tidy up this file
 // TODO: Improve DocumentSymbols function
 // TODO: Handle Incremental Changes to Trees
 
@@ -206,6 +205,23 @@ func DocumentSymbolsRecursive(node *tree_sitter.Node, content []byte) DocumentSy
 		return DocumentSymbol{}
 	}
 
+}
+
+func GetImports(code []byte, tree *tree_sitter.Tree) []util.Path {
+	importQuery := `
+(file_import filename: (string) @import)
+(definition (identifier) (library filename: (string) @import))
+`
+	paths := []util.Path{}
+	rslts := GetQueryMatches(importQuery, code, tree)
+	for _, imports := range rslts.results {
+		for _, imp := range imports {
+			p := imp.Utf8Text(code)
+			cleanRelPath := p[1 : len(p)-1]
+			paths = append(paths, cleanRelPath)
+		}
+	}
+	return paths
 }
 
 func GetQueryMatches(queryStr string, code []byte, tree *tree_sitter.Tree) TSQueryResult {

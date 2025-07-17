@@ -250,7 +250,7 @@ func TextDocumentSymbol(ctx context.Context, s *Server, par json.RawMessage) (js
 	json.Unmarshal(par, &params)
 
 	fileURI := params.TextDocument.URI
-	path, err := util.Uri2path(string(fileURI))
+	path, err := util.URI2path(string(fileURI))
 	if err != nil {
 		return []byte{}, err
 	}

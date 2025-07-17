@@ -11,12 +11,12 @@ import (
 func TestUri2path(t *testing.T) {
 
 	if runtime.GOOS != "windows" {
-		path, _ := util.Uri2path("file:///home/user/a.dsp")
+		path, _ := util.URI2path("file:///home/user/a.dsp")
 		if !(path == "/home/user/a.dsp") {
 			t.Fatalf("Invalid Unix Path %s\n", path)
 		}
 	} else {
-		path, _ := util.Uri2path("file:///C:/users/user/file.txt")
+		path, _ := util.URI2path("file:///C:/users/user/file.txt")
 		if !(path == "C:\\users\\user\\file.txt") {
 			t.Fatalf("Invalid Windows Path %s\n", path)
 		}

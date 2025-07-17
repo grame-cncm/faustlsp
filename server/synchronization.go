@@ -28,7 +28,7 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	json.Unmarshal(par, &params)
 
 	fileURI := params.TextDocument.URI
-	path, err := util.Uri2path(string(fileURI))
+	path, err := util.URI2path(string(fileURI))
 	if err != nil {
 		logging.Logger.Error("Failed to convert URI to path", "error", err, "uri", fileURI, "path", path)
 	}
@@ -54,7 +54,7 @@ func TextDocumentChangeFull(ctx context.Context, s *Server, par json.RawMessage)
 
 	fileURI := params.TextDocument.URI
 
-	path, err := util.Uri2path(string(fileURI))
+	path, err := util.URI2path(string(fileURI))
 	if err != nil {
 		return err
 	}
@@ -72,7 +72,7 @@ func TextDocumentChangeIncremental(ctx context.Context, s *Server, par json.RawM
 	logging.Logger.Info("TextDocumentChangeIncremental", "params", string(par))
 	fileURI := params.TextDocument.URI
 
-	path, err := util.Uri2path(string(fileURI))
+	path, err := util.URI2path(string(fileURI))
 	if err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func TextDocumentClose(ctx context.Context, s *Server, par json.RawMessage) erro
 
 	s.Files.CloseFromURI(util.Path(params.TextDocument.URI))
 
-	path, err := util.Uri2path(string(fileURI))
+	path, err := util.URI2path(string(fileURI))
 	logging.Logger.Error("Got error when getting path from URI", "error", err)
 	s.Workspace.TDEvents <- TDEvent{Type: TDClose, Path: path}
 

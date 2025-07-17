@@ -32,4 +32,5 @@ func Init() {
 	Logger = slog.New(slog.NewJSONHandler(f, &slog.HandlerOptions{
 		AddSource: true,
 	}))
+
 }

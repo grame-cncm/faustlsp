@@ -58,7 +58,7 @@ func Formatting(ctx context.Context, s *Server, par json.RawMessage) (json.RawMe
 	json.Unmarshal(par, &params)
 
 	logging.Logger.Info("Formatting request", "params", string(par))
-	path, err := util.Uri2path(string(params.TextDocument.URI))
+	path, err := util.URI2path(string(params.TextDocument.URI))
 	if err != nil {
 		logging.Logger.Error("Uri2path error", "error", err)
 	}
