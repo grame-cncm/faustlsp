@@ -12,71 +12,35 @@ import (
 	"github.com/carn181/faustlsp/util"
 )
 
-// 1) Symbol map(Symbol->Symbols with similar name parsed in project)
-//        |-> Useful for code completion identifiers, hover,  goto def and ref,
-//  2)  Maybe have a file store with pointers to symbols defined in it along with pointers to other files
-//    Useful to have a knowledge of what symbols are in scope for a file
-// 3) Import resolve to a particular file store pointer
-// 4) All this should be computed right after TD/Change is applied
-// 5) Need to figure out how to evaluate this partially, rather than computing the whole symbol store every TDChange
+type Identifier = string
 
 type SymbolStore struct {
-	mu   sync.Mutex
-	syms map[util.Handle][]*IdentifierSym
+	mu sync.Mutex
+	// Map from symbol to all possible symbols for the given symbol
+	syms map[Identifier][]*IdentifierSym
 }
 
-type SymbolFilesStore struct {
-	mu    sync.Mutex
-	files map[util.Handle][]*SymbolsFile
-}
-
-func (store *SymbolStore) Add(handle util.Handle, sym *IdentifierSym) {
-	store.mu.Lock()
-	syms := store.syms[handle]
-	store.syms[handle] = append(syms, sym)
-	store.mu.Unlock()
+func (s *SymbolStore) Init() {
+	s.syms = make(map[Identifier][]*IdentifierSym)
 }
 
 type IdentifierSym struct {
 	Name       string
 	Definition transport.Location
+	Uses       []*File // Function Calls/Use
 }
 
-type SymbolsFile struct {
-	Handle        util.Handle
-	Syms          []*IdentifierSym
-	ImportedFiles []*SymbolsFile
-}
-
-func IsImported(f SymbolsFile, target util.Handle) bool {
-	files := f.ImportedFiles
+func IsImported(f File, target util.Handle) bool {
+	files := f.Imports
 	for _, file := range files {
-		if file.Handle == target {
+		fileHandle := util.FromPath(file.Path)
+		if fileHandle == target {
 			return true
 		}
-		IsImported(f, file.Handle)
+		IsImported(f, fileHandle)
 	}
 	return false
 }
-
-// On workspace creation
-// 1) Go through all files
-// 2) First add all dependency trees to SymbolFilesStore. If file already imported, only get pointer from that
-// 3) Then parse all top-level symbols defined in each file and store. Same logic as above
-// 4) Test and see current store state when given a file
-
-// TODO: Need some way to delete from these stores too
-// TODO: Handle library expressions
-
-// SymbolFilesStoreAddFilesBasic(File) {
-// imports := GetImports(File)
-// SymbolsFile{Handle := File.Handle}
-// for _, import := range imports {
-// SymbolFilesStoreAddFilesBasic
-//    SymbolsFile.ImportedFiles = append(..., resolve(import))
-// }
-//   sf.files[File.Handle] := &SymbolsFile
-// }
 
 func (w *Workspace) GetFaustDSPDir() string {
 	faustCommand := w.config.Command
@@ -173,5 +137,83 @@ func (w *Workspace) CreateImportTree(fs *Files, fileRelPath util.Path, rootDir u
 		f.Imports = append(f.Imports, importFile)
 		fs.mu.Unlock()
 		//		fs.mu.Unlock()
+	}
+}
+
+func ParseSymbolsToStore(file *File, s *Server) {
+	// Need a symbolstore and TSParser
+	// Avoid parsing visited files
+
+	visitedFiles := make(map[util.Path]struct{})
+
+	var parseSymbols func(f *File)
+	parseSymbols = func(f *File) {
+
+		// Parse this file
+		queryStr := `
+(program
+(function_definition name: (identifier) @definition)
+(definition variable: (identifier) @definition))
+`
+		tree := parser.ParseTree(f.Content)
+		rslts := parser.GetQueryMatches(queryStr, f.Content, tree)
+		defer tree.Close()
+
+		logging.Logger.Info("Got rslts for current file", "path", f.Path)
+		storeSymbols(rslts, f, &s.Symbols)
+
+		// Parse the imports
+		for _, importFile := range f.Imports {
+			_, ok := visitedFiles[importFile.Path]
+			if !ok {
+				visitedFiles[importFile.Path] = struct{}{}
+				parseSymbols(importFile)
+			}
+		}
+	}
+
+	parseSymbols(file)
+
+	//	logging.Logger.Info("Parsed Symbols as", "symbols", s.Symbols.syms)
+
+}
+
+func storeSymbols(rslts parser.TSQueryResult, file *File, symbols *SymbolStore) {
+	for symbolType, nodes := range rslts.Results {
+		// TODO: Use symbolType later for handling library statements
+		_ = symbolType
+		for _, node := range nodes {
+			//			logging.Logger.Info("Got Result", "type", symbolType, "node", node.Utf8Text(content))
+
+			identName := node.Utf8Text(file.Content)
+			start := node.StartPosition()
+			end := node.EndPosition()
+			var identifier = IdentifierSym{
+				Name: identName,
+				Definition: transport.Location{
+					URI: transport.DocumentURI(file.URI),
+					Range: transport.Range{
+						Start: transport.Position{
+							Line:      uint32(start.Row),
+							Character: uint32(start.Column),
+						},
+						End: transport.Position{
+							Line:      uint32(end.Row),
+							Character: uint32(end.Column),
+						},
+					},
+				},
+			}
+			file.Syms = append(file.Syms, &identifier)
+
+			symbols.mu.Lock()
+			matches, ok := symbols.syms[identName]
+			if ok {
+				symbols.syms[identName] = append(matches, &identifier)
+			} else {
+				symbols.syms[identName] = []*IdentifierSym{&identifier}
+			}
+			symbols.mu.Unlock()
+		}
 	}
 }

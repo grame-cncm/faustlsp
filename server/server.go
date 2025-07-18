@@ -39,6 +39,7 @@ type Server struct {
 	// Workspace and Files are different because in future should allow having multiple workspaces while having one main File Store, but both have to be synchronized on each document Change
 	Workspace Workspace
 	Files     Files
+	Symbols   SymbolStore
 
 	Status ServerState
 	mu     sync.Mutex
@@ -62,6 +63,7 @@ func (s *Server) Init(transp transport.TransportMethod) {
 	s.Status = Created
 	s.Transport.Init(transport.Server, transp)
 	parser.Init()
+	s.Symbols.Init()
 
 	// Create Temporary Directory
 	faustTemp := filepath.Join(os.TempDir(), "faustlsp") // No need to create $TEMPDIR/faustlsp as logging should create it
@@ -232,7 +234,8 @@ var requestHandlers = map[string]func(context.Context, *Server, json.RawMessage)
 	"initialize":                  Initialize,
 	"textDocument/documentSymbol": TextDocumentSymbol,
 	"textDocument/formatting":     Formatting,
-	"shutdown":                    ShutdownEnd,
+	//	"textDocument/definition":     Definition,
+	"shutdown": ShutdownEnd,
 }
 
 // Map from method to method handler for request methods

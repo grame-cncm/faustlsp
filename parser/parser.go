@@ -30,7 +30,8 @@ func Init() {
 }
 
 type TSQueryResult struct {
-	results map[string][]tree_sitter.Node
+	// Here string is labels matched from your TS Query
+	Results map[string][]tree_sitter.Node
 }
 
 func ParseTree(code []byte) *tree_sitter.Tree {
@@ -49,7 +50,7 @@ func TSDiagnostics(code []byte, tree *tree_sitter.Tree) []Diagnostic {
 	rslts := GetQueryMatches(errorQuery, code, tree)
 
 	var diagnostics = []Diagnostic{}
-	for _, errors := range rslts.results {
+	for _, errors := range rslts.Results {
 		for _, node := range errors {
 			// First named parent node from error
 			prev := node.Parent()
@@ -214,7 +215,7 @@ func GetImports(code []byte, tree *tree_sitter.Tree) []util.Path {
 `
 	paths := []util.Path{}
 	rslts := GetQueryMatches(importQuery, code, tree)
-	for _, imports := range rslts.results {
+	for _, imports := range rslts.Results {
 		for _, imp := range imports {
 			p := imp.Utf8Text(code)
 			cleanRelPath := p[1 : len(p)-1]
@@ -234,16 +235,16 @@ func GetQueryMatches(queryStr string, code []byte, tree *tree_sitter.Tree) TSQue
 	matches := cursor.Matches(query, tree.RootNode(), code)
 
 	var result TSQueryResult
-	result.results = make(map[string][]tree_sitter.Node)
+	result.Results = make(map[string][]tree_sitter.Node)
 	for match := matches.Next(); match != nil; match = matches.Next() {
 		for _, capture := range match.Captures {
 			//			fmt.Printf("Match %d, Capture %d (%s): %s\n", match.PatternIndex, capture.Index, query.CaptureNames()[capture.Index], capture.Node.Utf8Text(code))
 
 			// Add to result
 			captureName := query.CaptureNames()[capture.Index]
-			captures, _ := result.results[captureName]
+			captures, _ := result.Results[captureName]
 			node := capture.Node
-			result.results[captureName] = append(captures, node)
+			result.Results[captureName] = append(captures, node)
 		}
 	}
 

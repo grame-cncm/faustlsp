@@ -96,7 +96,16 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 
 				s.Files.OpenFromPath(path, workspace.Root, false, "", tempDirFilePath)
 				workspace.addFileFromFileStore(path, s)
+
+				// Create Import Tree
+				// TODO: Implement updating this import tree
 				workspace.CreateImportTree(&s.Files, relPath, workspace.Root)
+
+				// Parse Symbols to Symbol Store
+				file, _ := s.Files.Get(path)
+				s.Files.mu.Lock()
+				ParseSymbolsToStore(file, s)
+				s.Files.mu.Unlock()
 				workspace.DiagnoseFile(path, s)
 			}
 		}
@@ -150,7 +159,7 @@ func (workspace *Workspace) StartTrackingChanges(ctx context.Context, s *Server)
 		}
 		if info.IsDir() {
 			watcher.Add(path)
-			logging.Logger.Info("Watching %s in workspace %s\n", path, workspace.Root)
+			logging.Logger.Info("Watching file in workspace %s\n", path, workspace.Root)
 		}
 		return nil
 	})
@@ -359,11 +368,13 @@ func (workspace *Workspace) addFileFromFileStore(path util.Path, s *Server) {
 
 func (w *Workspace) DiagnoseFile(path util.Path, s *Server) {
 	if IsFaustFile(path) {
+		logging.Logger.Info("Diagnosing File", "path", path)
 		params := s.Files.TSDiagnostics(path)
 		if params.URI != "" {
 			s.diagChan <- params
 		}
 		if len(params.Diagnostics) == 0 {
+			logging.Logger.Info("Generating Compiler errors as no syntax errors")
 			// Compiler Diagnostics if exists
 			if w.config.CompilerDiagnostics {
 				w.sendCompilerDiagnostics(s)
