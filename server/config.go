@@ -34,10 +34,12 @@ func (w *Workspace) sendCompilerDiagnostics(s *Server) {
 	for _, filePath := range w.config.ProcessFiles {
 		path := filepath.Join(w.Root, filePath)
 		f, ok := s.Files.Get(path)
+		logging.Logger.Info("Generating Compiler Diagnostics", "temp_path", f.TempPath)
 		if ok {
 			if !f.hasSyntaxErrors {
 				var diagnosticErrors = []transport.Diagnostic{}
 				uri := util.Path2URI(path)
+				logging.Logger.Info("Generating Compiler Diagnostics", "temp_path", f.TempPath)
 				diagnosticError := getCompilerDiagnostics(f.TempPath, w.Root, w.config)
 				if diagnosticError.Message != "" {
 					diagnosticErrors = []transport.Diagnostic{diagnosticError}

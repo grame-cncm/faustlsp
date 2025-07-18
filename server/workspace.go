@@ -120,7 +120,8 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 }
 
 func (workspace *Workspace) loadConfigFiles(s *Server) {
-	f, ok := s.Files.Get(filepath.Join(workspace.Root, faustConfigFile))
+	configFilePath := filepath.Join(workspace.Root, faustConfigFile)
+	f, ok := s.Files.Get(configFilePath)
 	var cfg FaustProjectConfig
 	var err error
 	if ok {
@@ -129,7 +130,19 @@ func (workspace *Workspace) loadConfigFiles(s *Server) {
 			cfg = workspace.defaultConfig()
 		}
 	} else {
-		cfg = workspace.defaultConfig()
+		// Try opening file if not opened but it exists
+		relPath := configFilePath[len(workspace.Root)+1:]
+		tempDirFilePath := filepath.Join(s.tempDir, filepath.Base(workspace.Root), relPath)
+		s.Files.OpenFromPath(configFilePath, workspace.Root, false, "", tempDirFilePath)
+		f, ok := s.Files.Get(configFilePath)
+		if ok {
+			cfg, err = workspace.parseConfig(f.Content)
+			if err != nil {
+				cfg = workspace.defaultConfig()
+			}
+		} else {
+			cfg = workspace.defaultConfig()
+		}
 	}
 	workspace.config = cfg
 	logging.Logger.Info("Workspace Config", "config", cfg)
@@ -374,9 +387,9 @@ func (w *Workspace) DiagnoseFile(path util.Path, s *Server) {
 			s.diagChan <- params
 		}
 		if len(params.Diagnostics) == 0 {
-			logging.Logger.Info("Generating Compiler errors as no syntax errors")
 			// Compiler Diagnostics if exists
 			if w.config.CompilerDiagnostics {
+				logging.Logger.Info("Generating Compiler errors as no syntax errors")
 				w.sendCompilerDiagnostics(s)
 			}
 		}
