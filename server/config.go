@@ -24,8 +24,11 @@ func (w *Workspace) Rel2Abs(relPath string) util.Path {
 
 func (w *Workspace) cleanDiagnostics(s *Server) {
 	for _, f := range w.Files {
-		if IsFaustFile(f.Path) {
-			w.DiagnoseFile(f.Path, s)
+		f.mu.RLock()
+		path := f.Path
+		f.mu.RUnlock()
+		if IsFaustFile(path) {
+			w.DiagnoseFile(path, s)
 		}
 	}
 }
@@ -34,7 +37,10 @@ func (w *Workspace) sendCompilerDiagnostics(s *Server) {
 	for _, filePath := range w.config.ProcessFiles {
 		path := filepath.Join(w.Root, filePath)
 		f, ok := s.Files.Get(path)
+		f.mu.RLock()
 		logging.Logger.Info("Generating Compiler Diagnostics", "temp_path", f.TempPath)
+		f.mu.RUnlock()
+
 		if ok {
 			if !f.hasSyntaxErrors {
 				var diagnosticErrors = []transport.Diagnostic{}

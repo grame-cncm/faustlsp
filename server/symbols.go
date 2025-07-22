@@ -105,9 +105,13 @@ func (w *Workspace) CreateImportTree(fs *Files, fileRelPath util.Path, rootDir u
 	}
 	//	logging.Logger.Info("Getting Imports for file", "path", f.Path)
 
-	tree := parser.ParseTree(f.Content)
+	f.mu.RLock()
+	fileContent := f.Content
+	f.mu.RUnlock()
+
+	tree := parser.ParseTree(fileContent)
 	defer tree.Close()
-	imports := parser.GetImports(f.Content, tree)
+	imports := parser.GetImports(fileContent, tree)
 	//	logging.Logger.Info("Got imports for file", "path", f.Path, "imports", imports)
 	for _, importPath := range imports {
 
@@ -121,7 +125,9 @@ func (w *Workspace) CreateImportTree(fs *Files, fileRelPath util.Path, rootDir u
 		importFile, ok := fs.Get(resolvePath)
 		if ok {
 			//			logging.Logger.Info("Imported file already added in store, skipping", "path", resolvePath)
+			f.mu.Lock()
 			f.Imports = append(f.Imports, importFile)
+			f.mu.Unlock()
 			continue
 
 		}
@@ -134,7 +140,9 @@ func (w *Workspace) CreateImportTree(fs *Files, fileRelPath util.Path, rootDir u
 			logging.Logger.Error("imported File should've been in store if it exists", "importing file", file.Path, "imported file path", resolvePath)
 		}
 		fs.mu.Lock()
+		f.mu.Lock()
 		f.Imports = append(f.Imports, importFile)
+		f.mu.Unlock()
 		fs.mu.Unlock()
 		//		fs.mu.Unlock()
 	}
@@ -155,15 +163,24 @@ func ParseSymbolsToStore(file *File, s *Server) {
 (function_definition name: (identifier) @definition)
 (definition variable: (identifier) @definition))
 `
-		tree := parser.ParseTree(f.Content)
-		rslts := parser.GetQueryMatches(queryStr, f.Content, tree)
+
+		f.mu.RLock()
+		fileContent := f.Content
+		f.mu.RUnlock()
+		tree := parser.ParseTree(fileContent)
+		rslts := parser.GetQueryMatches(queryStr, fileContent, tree)
 		defer tree.Close()
 
 		logging.Logger.Info("Got rslts for current file", "path", f.Path)
+
 		storeSymbols(rslts, f, &s.Symbols)
 
 		// Parse the imports
-		for _, importFile := range f.Imports {
+		f.mu.RLock()
+		imports := f.Imports
+		f.mu.RUnlock()
+
+		for _, importFile := range imports {
 			_, ok := visitedFiles[importFile.Path]
 			if !ok {
 				visitedFiles[importFile.Path] = struct{}{}
@@ -179,15 +196,18 @@ func ParseSymbolsToStore(file *File, s *Server) {
 }
 
 func storeSymbols(rslts parser.TSQueryResult, file *File, symbols *SymbolStore) {
+
 	for symbolType, nodes := range rslts.Results {
 		// TODO: Use symbolType later for handling library statements
 		_ = symbolType
 		for _, node := range nodes {
 			//			logging.Logger.Info("Got Result", "type", symbolType, "node", node.Utf8Text(content))
 
+			file.mu.Lock()
 			identName := node.Utf8Text(file.Content)
 			start := node.StartPosition()
 			end := node.EndPosition()
+
 			var identifier = IdentifierSym{
 				Name: identName,
 				Definition: transport.Location{
@@ -205,6 +225,7 @@ func storeSymbols(rslts parser.TSQueryResult, file *File, symbols *SymbolStore) 
 				},
 			}
 			file.Syms = append(file.Syms, &identifier)
+			file.mu.Unlock()
 
 			symbols.mu.Lock()
 			matches, ok := symbols.syms[identName]

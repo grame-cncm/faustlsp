@@ -125,7 +125,9 @@ func (workspace *Workspace) loadConfigFiles(s *Server) {
 	var cfg FaustProjectConfig
 	var err error
 	if ok {
+		f.mu.RLock()
 		cfg, err = workspace.parseConfig(f.Content)
+		f.mu.RUnlock()
 		if err != nil {
 			cfg = workspace.defaultConfig()
 		}
@@ -136,7 +138,9 @@ func (workspace *Workspace) loadConfigFiles(s *Server) {
 		s.Files.OpenFromPath(configFilePath, workspace.Root, false, "", tempDirFilePath)
 		f, ok := s.Files.Get(configFilePath)
 		if ok {
+			f.mu.RLock()
 			cfg, err = workspace.parseConfig(f.Content)
+			f.mu.RUnlock()
 			if err != nil {
 				cfg = workspace.defaultConfig()
 			}
@@ -221,7 +225,11 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 	// If file of this path is already open in File Store, ignore this event
 	file, ok := s.Files.Get(origPath)
 	if ok {
-		if file.Open {
+		file.mu.RLock()
+		open := file.Open
+		file.mu.RUnlock()
+		if open {
+
 			return
 		}
 	}
