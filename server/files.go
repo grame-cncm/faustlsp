@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,15 +17,20 @@ import (
 
 type File struct {
 	// Ensure thread-safety for modifications
-	mu sync.RWMutex
-
-	// TODO: Shift to Handle instead of URI and Path
+	mu     sync.RWMutex
 	Handle util.Handle
 
+	// A file's Syntax Tree Scope. Contains all symbols that are accessible in it.
+	// Parent of this scope will be nil
 	Scope *Scope
 
+	// File Content
 	Content []byte
 
+	// Hash for each file. Used for caching scopes.
+	Hash [sha256.Size]byte
+
+	// TODO: Shift away from using this in diagnostics checking step
 	hasSyntaxErrors bool
 }
 
@@ -32,6 +38,8 @@ func (f *File) LogValue() slog.Value {
 	// Create a map with all file attributes
 	fileAttrs := map[string]any{
 		"Handle": f.Handle,
+		"Hash":   f.Hash,
+		"Scope":  f.Scope,
 	}
 	return slog.AnyValue(fileAttrs)
 }
@@ -110,6 +118,7 @@ func (files *Files) Open(handle util.Handle) {
 	var file = File{
 		Handle:  handle,
 		Content: content,
+		Hash:    sha256.Sum256(content),
 	}
 
 	files.mu.Lock()
@@ -164,6 +173,7 @@ func (files *Files) ModifyFull(path util.Path, content string) {
 	files.mu.Lock()
 	f.mu.Lock()
 	f.Content = []byte(content)
+	f.Hash = sha256.Sum256(f.Content)
 	f.mu.Unlock()
 
 	files.mu.Unlock()
@@ -186,6 +196,7 @@ func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Rang
 	files.mu.Lock()
 	f.mu.Lock()
 	f.Content = []byte(result)
+	f.Hash = sha256.Sum256(f.Content)
 	f.mu.Unlock()
 
 	files.mu.Unlock()

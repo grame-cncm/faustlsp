@@ -13,51 +13,15 @@ import (
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
-type Identifier = string
-
-type SymbolStore struct {
-	mu sync.Mutex
-	// Map from symbol to all possible symbols for the given symbol
-	syms map[Identifier][]*IdentifierSym
-}
-
-func (s *SymbolStore) Init() {
-	s.syms = make(map[Identifier][]*IdentifierSym)
-}
-
-type IdentifierSym struct {
-	Name       string
-	Definition transport.Location
-	Uses       []*File // Function Calls/Use
-
-	// Used to distinguish between symbols in a single file
-	// Empty for top-level definitions
-	// Variable name for environments
-	// Expression for with and letrec environments
-	// Needs function that gets scopename for any node
-	ScopeName string
-}
-
-type EnvironmentSym struct {
-	Name       string
-	Definition transport.Location
-	Symbols    []*IdentifierSym
-
-	ScopeName string
-}
-
-// Model using scopes + symbols
-// Let's say we start with a.dsp
-// Scope all top-levels in a.dsp
-// All environments in a.dsp as Scope with type
-// Let's say it imports another file
-// Scope of that file is converted to this file and our scope symbols adds all those
-// If it's a library, assign scope to the variable like environments
-
+// Types for Symbols
 type SymbolKind int
 
 const (
 	Definition SymbolKind = iota
+	WithEnvironment
+	LetRecEnvironment
+	Case
+	Iteration
 	Environment
 	Library
 )
@@ -75,6 +39,13 @@ type Symbol interface {
 type Scope struct {
 	Parent  *Scope
 	Symbols map[string]Symbol
+}
+
+func NewScope(parent *Scope) *Scope {
+	return &Scope{
+		Parent:  parent,
+		Symbols: make(map[string]Symbol),
+	}
 }
 
 // BaseSymbol provides common fields for embedding in concrete symbol types.
@@ -106,11 +77,14 @@ type EnvironmentSymbol struct {
 	Scope *Scope
 }
 
-func NewScope(parent *Scope) *Scope {
-	return &Scope{
-		Parent:  parent,
-		Symbols: make(map[string]Symbol),
-	}
+type LibrarySymbol struct {
+	BaseSymbol
+	File util.Path
+}
+
+type ImportSymbol struct {
+	BaseSymbol
+	File util.Path
 }
 
 // DependencyGraph manages the import relationships between files.
@@ -169,49 +143,18 @@ func (dg *DependencyGraph) RemoveDependenciesForFile(path util.Path) {
 }
 
 // GetImporters returns a list of URIs that import the given file.
-func (dg *DependencyGraph) GetImporters(uri string) []string {
+func (dg *DependencyGraph) GetImporters(path string) []string {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
 
 	importers := []string{}
-	if s, ok := dg.importedBy[uri]; ok {
-		for importerURI := range s {
-			importers = append(importers, importerURI)
+	if s, ok := dg.importedBy[path]; ok {
+		for importerPath := range s {
+			importers = append(importers, importerPath)
 		}
 	}
 	return importers
 }
-
-// For a given file:
-// 1) Create scope
-// 2) Go through AST
-// 3) Add definitions to scope
-// 4) If import, first recurse through that file and then add all the symbols in that file's scope to this
-// 5) If library, same but do as environment instead of global scope
-// 6)
-// END) Set file scope to this scope
-
-// First parse all scopes with all imports and library
-// When you get goto definition, keep going up in parent scopes till you find a matching symbol
-// When you get goto references, first find definition, then go down in scopes and find uses of that variable (EXPENSIVE)
-// Maybe compute a reference table for this too. Only problem is mapping
-
-// Every document change, parse out these scopes visiting the whole import tree (EXPENSIVE)
-// Solution: Add hashes to file based on content. Keep cached storage of scopes for a certain hash. Recompute when a child has a different hash.
-// Also handle unresolved symbols in all these cases. You might get gibberish in the AST from tree-sitter
-
-// Code Completion: Get all symbols in scope + primitives -> Fuzzy match with node in cursor
-
-// 1) Files Store with scope associated with each file
-// 2) Reference Lookup Map for a given defined symbol. Key = struct{file, name, line, char}
-// 3) Dependency Graph of Files to know which files to update
-
-// To update a file
-//
-
-// A given file's scope depends on the files it imports
-// So when a file updates, if it doesn't have imports, just parse as normal and modify our file store file scope
-// If it has imports, before parsing our file, go through our imported files. Keep going till leaf file and check if it is cached. Then use cached result, and go up. Keep doing.
 
 type SymbolKey struct {
 	File util.Path
@@ -306,72 +249,3 @@ func (w *Workspace) ResolveFilePath(relPath util.Path, rootDir util.Path) (util.
 
 	return "", ""
 }
-
-// // Traverses through imports of file and adds them to Store along with import information
-// func (w *Workspace) CreateImportTree(fs *Files, fileRelPath util.Path, rootDir util.Path) {
-//	// TODO: Take relative paths and rootDir, instead of util.Handle for versatility for -dspdir or include paths
-//	fullPath := filepath.Join(rootDir, fileRelPath)
-//	file := util.FromPath(fullPath)
-
-//	f, ok := fs.Get(file.Path)
-//	if !ok {
-//		//		logging.Logger.Error("File not in store", "path", file.Path)
-
-//		resolvedFilePath, resolvedRootDir := w.ResolveFilePath(fileRelPath, rootDir)
-//		if resolvedFilePath == "" {
-//			logging.Logger.Error("Couldn't find file", "path", fullPath)
-//			return
-//		}
-
-//		resolvedFile := util.FromPath(resolvedFilePath)
-
-//		// TODO: Create temporary files for resolved import files as well
-//		//       E.g. TEMP/faustlsp/faust
-//		// TODO: Use ID's along with temp-dir paths to avoid name clashes
-//		fs.OpenFromPath(resolvedFilePath, resolvedRootDir, true, resolvedFile.URI, resolvedFile.Path)
-//		f, ok = fs.Get(resolvedFilePath)
-//	}
-//	//	logging.Logger.Info("Getting Imports for file", "path", f.Path)
-
-//	f.mu.RLock()
-//	fileContent := f.Content
-//	f.mu.RUnlock()
-
-//	tree := parser.ParseTree(fileContent)
-//	defer tree.Close()
-//	imports := parser.GetImports(fileContent, tree)
-//	//	logging.Logger.Info("Got imports for file", "path", f.Path, "imports", imports)
-//	for _, importPath := range imports {
-
-//		resolvePath, resolvedRootDir := w.ResolveFilePath(importPath, rootDir)
-
-//		if resolvePath == f.Path {
-//			//			logging.Logger.Info("Trying to import same file, avoiding cycle", "path", resolvePath)
-//			continue
-//		}
-
-//		importFile, ok := fs.Get(resolvePath)
-//		if ok {
-//			//			logging.Logger.Info("Imported file already added in store, skipping", "path", resolvePath)
-//			f.mu.Lock()
-//			f.Imports = append(f.Imports, importFile)
-//			f.mu.Unlock()
-//			continue
-
-//		}
-
-//		w.CreateImportTree(fs, importPath, resolvedRootDir)
-
-//		//		fs.mu.Lock()
-//		importFile, ok = fs.Get(resolvePath)
-//		if !ok {
-//			logging.Logger.Error("imported File should've been in store if it exists", "importing file", file.Path, "imported file path", resolvePath)
-//		}
-//		fs.mu.Lock()
-//		f.mu.Lock()
-//		f.Imports = append(f.Imports, importFile)
-//		f.mu.Unlock()
-//		fs.mu.Unlock()
-//		//		fs.mu.Unlock()
-//	}
-// }
