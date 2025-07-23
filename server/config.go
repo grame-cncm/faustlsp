@@ -23,7 +23,8 @@ func (w *Workspace) Rel2Abs(relPath string) util.Path {
 }
 
 func (w *Workspace) cleanDiagnostics(s *Server) {
-	for _, f := range w.Files {
+	for _, path := range w.Files {
+		f, _ := s.Files.GetFromPath(path)
 		f.mu.RLock()
 		path := f.Handle.Path
 		f.mu.RUnlock()
@@ -103,10 +104,9 @@ func (w *Workspace) defaultConfig() FaustProjectConfig {
 
 func (w *Workspace) getFaustDSPRelativePaths() []util.Path {
 	var filePaths = []util.Path{}
-	for key, file := range w.Files {
-		if IsDSPFile(key) {
-			relPath := file.RelPath
-			filePaths = append(filePaths, relPath)
+	for _, file := range w.Files {
+		if IsDSPFile(file) {
+			filePaths = append(filePaths, file)
 		}
 	}
 	return filePaths

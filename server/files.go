@@ -21,9 +21,6 @@ type File struct {
 	// TODO: Shift to Handle instead of URI and Path
 	Handle util.Handle
 
-	RelPath  util.Path // Path relative to a workspace
-	TempPath util.Path // Path for temporary
-
 	Scope *Scope
 
 	Content []byte
@@ -34,12 +31,11 @@ type File struct {
 func (f *File) LogValue() slog.Value {
 	// Create a map with all file attributes
 	fileAttrs := map[string]any{
-		"Handle":   f.Handle,
-		"RelPath":  f.RelPath,
-		"TempPath": f.TempPath,
+		"Handle": f.Handle,
 	}
 	return slog.AnyValue(fileAttrs)
 }
+
 func (f *File) DocumentSymbols() []transport.DocumentSymbol {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -250,4 +246,19 @@ func (files *Files) String() string {
 		}
 	}
 	return str
+}
+
+func (files *Files) LogValue() slog.Value {
+	fs := make([]any, 0, len(files.fs))
+	files.mu.Lock()
+	defer files.mu.Unlock()
+
+	for handle, file := range files.fs {
+		if IsFaustFile(handle.Path) {
+			// Use each file's LogValue method to get its proper representation
+			fileValue := file.LogValue()
+			fs = append(fs, fileValue.Any())
+		}
+	}
+	return slog.AnyValue(fs)
 }

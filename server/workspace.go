@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 
 	"github.com/carn181/faustlsp/logging"
@@ -18,18 +19,13 @@ import (
 
 const faustConfigFile = ".faustcfg.json"
 
-type WorkspaceFiles map[util.Path]*File
+type WorkspaceFiles []util.Path
 
 func (w WorkspaceFiles) LogValue() slog.Value {
 	files := make([]any, 0, len(w))
-	for key, value := range w {
-		// Extract the File's LogValue to use its structured logging format
-		fileValue := value.LogValue()
-		// Since File.LogValue() now returns an AnyValue with a map,
-		// we need to handle it differently
+	for _, key := range w {
 		files = append(files, map[string]any{
 			"path": key,
-			"file": fileValue.Any(),
 		})
 	}
 
@@ -71,7 +67,7 @@ func (workspace *Workspace) TempDirPath(filePath util.Path) util.Path {
 
 func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 	// Open all files in workspace and add to File Store
-	workspace.Files = make(map[util.Path]*File)
+	workspace.Files = []util.Path{}
 	workspace.TDEvents = make(chan TDEvent)
 	workspace.openedFiles = make(map[util.Handle]struct{})
 	workspace.tempDir = s.tempDir
@@ -102,7 +98,7 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 				logging.Logger.Info("Opening file from workspace\n", "path", path)
 
 				s.Files.OpenFromPath(path)
-				workspace.addFileFromFileStore(path, s)
+				workspace.addFile(path)
 
 				workspace.DiagnoseFile(path, s)
 			}
@@ -111,7 +107,7 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 	})
 
 	logging.Logger.Info("Workspace Files", "files", workspace.Files)
-	logging.Logger.Info("File Store", "files", s.Files.String())
+	logging.Logger.Info("File Store", "files", &s.Files)
 
 	go func() { workspace.StartTrackingChanges(ctx, s) }()
 	logging.Logger.Info("Started workspace watcher\n")
@@ -265,7 +261,7 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 				f.Chmod(fi.Mode())
 				f.Close()
 
-				workspace.addFileFromFileStore(origPath, s)
+				workspace.addFile(origPath)
 			}
 		} else {
 			// Rename Create
@@ -322,7 +318,7 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 		logging.Logger.Error("File should've been in File Store.", "path", origFilePath)
 	}
 
-	tempDirFilePath := filepath.Join(tempDir, workspace.Root, file.RelPath) // Construct the temporary file path
+	tempDirFilePath := filepath.Join(tempDir, origFilePath) // Construct the temporary file path
 	switch change.Type {
 	case TDOpen:
 		// Ensure directory exists before creating file. This mirrors the workspace's directory structure in the temp directory.
@@ -357,7 +353,7 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 			if ok {
 				os.WriteFile(tempDirFilePath, file.Content, os.FileMode(os.O_TRUNC)) // Write content to temporary file, replicating it from disk.
 			}
-			workspace.addFileFromFileStore(origFilePath, s)
+			workspace.addFile(origFilePath)
 		} else {
 			s.Files.RemoveFromPath(origFilePath) // Remove the file from the file store if the path isn't valid
 		}
@@ -371,10 +367,9 @@ func (workspace *Workspace) EditorOpenFile(uri util.URI, files *Files) {
 	workspace.openedFiles[handle] = struct{}{}
 }
 
-func (workspace *Workspace) addFileFromFileStore(path util.Path, s *Server) {
-	file, _ := s.Files.GetFromPath(path)
+func (workspace *Workspace) addFile(path util.Path) {
 	workspace.mu.Lock()
-	workspace.Files[path] = file
+	workspace.Files = append(workspace.Files, path)
 	workspace.mu.Unlock()
 }
 
@@ -398,6 +393,10 @@ func (w *Workspace) DiagnoseFile(path util.Path, s *Server) {
 
 func (workspace *Workspace) removeFile(path util.Path) {
 	workspace.mu.Lock()
-	delete(workspace.Files, path)
+	for i, filePath := range workspace.Files {
+		if filePath == path {
+			workspace.Files = slices.Delete(workspace.Files, i, i)
+		}
+	}
 	workspace.mu.Unlock()
 }
