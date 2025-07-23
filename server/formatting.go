@@ -63,7 +63,7 @@ func Formatting(ctx context.Context, s *Server, par json.RawMessage) (json.RawMe
 		logging.Logger.Error("Uri2path error", "error", err)
 	}
 
-	f, ok := s.Files.Get(path)
+	f, ok := s.Files.GetFromPath(path)
 	content := f.Content
 	var output []byte
 	if ok {

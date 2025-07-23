@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 
 	"github.com/carn181/faustlsp/logging"
 	"github.com/carn181/faustlsp/transport"
@@ -28,23 +27,18 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	json.Unmarshal(par, &params)
 
 	fileURI := params.TextDocument.URI
-	path, err := util.URI2path(string(fileURI))
-	if err != nil {
-		logging.Logger.Error("Failed to convert URI to path", "error", err, "uri", fileURI, "path", path)
-	}
-	// Open File
-	// Path relative to workspace
-	relPath := path[len(s.Workspace.Root)+1:]
-	workspaceFolderName := filepath.Base(s.Workspace.Root)
-	tempDirFilePath := filepath.Join(s.tempDir, workspaceFolderName, relPath)
 
-	s.Files.OpenFromURI(string(fileURI), s.Workspace.Root, true, tempDirFilePath)
+	// Open File
+	s.Workspace.EditorOpenFile(util.URI(fileURI), &s.Files)
 
 	logging.Logger.Info("Opening File", "uri", string(fileURI))
-	f, _ := s.Files.Get(path)
+	f, _ := s.Files.GetFromURI(util.URI(fileURI))
+
+	f.mu.RLock()
 	logging.Logger.Info("Current File", "content", f.Content)
 
-	s.Workspace.TDEvents <- TDEvent{Type: TDOpen, Path: path}
+	s.Workspace.TDEvents <- TDEvent{Type: TDOpen, Path: f.Handle.Path}
+	f.mu.RUnlock()
 	return nil
 }
 

@@ -40,6 +40,7 @@ type Server struct {
 	Workspace Workspace
 	Files     Files
 	Symbols   SymbolStore
+	Store     Store
 
 	Status ServerState
 	mu     sync.Mutex
@@ -48,7 +49,7 @@ type Server struct {
 	// possible values: stdin | socket
 	Transport transport.Transport
 
-	// Request Id Counter for new requests
+	// Request Id Counter for new requ ests
 	reqIdCtr int
 
 	// Temporary Directory where we replicate workspace for diagnostics
@@ -234,7 +235,7 @@ var requestHandlers = map[string]func(context.Context, *Server, json.RawMessage)
 	"initialize":                  Initialize,
 	"textDocument/documentSymbol": TextDocumentSymbol,
 	"textDocument/formatting":     Formatting,
-	//	"textDocument/definition":     Definition,
+	//	"textDocument/definition":     GetDefinition,
 	"shutdown": ShutdownEnd,
 }
 
@@ -257,7 +258,7 @@ func TextDocumentSymbol(ctx context.Context, s *Server, par json.RawMessage) (js
 	if err != nil {
 		return []byte{}, err
 	}
-	f, ok := s.Files.Get(path)
+	f, ok := s.Files.GetFromPath(path)
 	if !ok {
 		return []byte{}, fmt.Errorf("trying to get symbols from non-existent path: %s", path)
 	}

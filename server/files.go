@@ -12,47 +12,31 @@ import (
 	"github.com/carn181/faustlsp/parser"
 	"github.com/carn181/faustlsp/transport"
 	"github.com/carn181/faustlsp/util"
-
-	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 type File struct {
 	// Ensure thread-safety for modifications
 	mu sync.RWMutex
 
-	URI  util.URI
-	Path util.Path
-
 	// TODO: Shift to Handle instead of URI and Path
-	handle util.Handle
+	Handle util.Handle
 
 	RelPath  util.Path // Path relative to a workspace
 	TempPath util.Path // Path for temporary
 
-	Syms    []*IdentifierSym
-	Imports []*File
+	Scope *Scope
 
 	Content []byte
 
-	Open bool
-	Tree *tree_sitter.Tree
-	// To avoid freeing null tree in C
-	treeCreated     bool
 	hasSyntaxErrors bool
 }
 
 func (f *File) LogValue() slog.Value {
 	// Create a map with all file attributes
-	var imports = []util.Path{}
-	for _, imported := range f.Imports {
-		imports = append(imports, imported.Path)
-	}
 	fileAttrs := map[string]any{
-		"URI":      f.URI,
-		"Path":     f.Path,
+		"Handle":   f.Handle,
 		"RelPath":  f.RelPath,
 		"TempPath": f.TempPath,
-		"Imports":  imports,
 	}
 	return slog.AnyValue(fileAttrs)
 }
@@ -78,7 +62,7 @@ func (f *File) TSDiagnostics() transport.PublishDiagnosticsParams {
 		f.hasSyntaxErrors = true
 	}
 	d := transport.PublishDiagnosticsParams{
-		URI:         transport.DocumentURI(f.URI),
+		URI:         transport.DocumentURI(f.Handle.URI),
 		Diagnostics: errors,
 	}
 	return d
@@ -86,46 +70,39 @@ func (f *File) TSDiagnostics() transport.PublishDiagnosticsParams {
 
 type Files struct {
 	// Absolute Paths Only
-	fs       map[util.Path]*File
+	fs       map[util.Handle]*File
 	mu       sync.Mutex
 	encoding transport.PositionEncodingKind // Position Encoding for applying incremental changes. UTF-16 and UTF-32 supported
 }
 
 func (files *Files) Init(context context.Context, encoding transport.PositionEncodingKind) {
-	files.fs = make(map[string]*File)
+	files.fs = make(map[util.Handle]*File)
 	files.encoding = encoding
 }
 
-func (files *Files) OpenFromURI(uri util.URI, root util.Path, editorOpen bool, temp util.Path) {
-	path, err := util.URI2path(uri)
+func (files *Files) OpenFromURI(uri util.URI) {
+	handle, err := util.FromURI(uri)
 	if err != nil {
-		logging.Logger.Error("OpenFromURI error", "error", err)
-		return
+		logging.Logger.Error("Invalid URI", "uri", uri, "error", err)
 	}
-	files.OpenFromPath(path, root, editorOpen, uri, temp)
+	files.Open(handle)
 }
 
-func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool, uri util.URI, temp util.Path) {
-	var file File
+func (files *Files) OpenFromPath(path util.Path) {
+	handle := util.FromPath(path)
+	files.Open(handle)
+}
 
-	var relPath util.Path
-	_, ok := files.Get(path)
+func (files *Files) Open(handle util.Handle) {
+	_, ok := files.Get(handle)
 	// If File already in store, ignore
 	if ok {
-		logging.Logger.Info("File already in store", "path", path)
+		logging.Logger.Info("File already in store", "handle.Path", handle.Path)
 		return
 	}
+	logging.Logger.Info("Reading contents of file", "handle.Path", handle.Path)
 
-	if root == "" {
-		relPath = ""
-	} else {
-		size := len(root)
-		// +1 for / delimeter for only relative path
-		relPath = path[size+1:]
-	}
-	logging.Logger.Info("Reading contents of file", "path", path)
-
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(handle.Path)
 
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -134,40 +111,43 @@ func (files *Files) OpenFromPath(path util.Path, root util.Path, editorOpen bool
 		}
 	}
 
-	// Parse Tree
-	var tree *tree_sitter.Tree
-	var treemade bool
-
-	if uri == "" {
-		uri = util.Path2URI(path)
-	}
-	file = File{
-		Path:        path,
-		Content:     content,
-		Open:        editorOpen,
-		RelPath:     relPath,
-		Tree:        tree,
-		TempPath:    temp,
-		treeCreated: treemade,
-		URI:         uri,
+	var file = File{
+		Handle:  handle,
+		Content: content,
 	}
 
 	files.mu.Lock()
-	files.fs[path] = &file
+	files.fs[handle] = &file
 	files.mu.Unlock()
 }
 
-func (files *Files) Get(path util.Path) (*File, bool) {
+func (files *Files) Get(handle util.Handle) (*File, bool) {
 	files.mu.Lock()
-	file, ok := files.fs[path]
+	file, ok := files.fs[handle]
 	files.mu.Unlock()
+	return file, ok
+}
+
+func (files *Files) GetFromPath(path util.Path) (*File, bool) {
+	handle := util.FromPath(path)
+	file, ok := files.Get(handle)
+	return file, ok
+}
+
+func (files *Files) GetFromURI(uri util.URI) (*File, bool) {
+	handle, err := util.FromURI(uri)
+	if err != nil {
+		return nil, false
+	}
+	file, ok := files.Get(handle)
 	return file, ok
 }
 
 func (files *Files) TSDiagnostics(path util.Path) transport.PublishDiagnosticsParams {
 	d := transport.PublishDiagnosticsParams{}
+
+	file, ok := files.GetFromPath(path)
 	files.mu.Lock()
-	file, ok := files.fs[path]
 	if ok {
 		d = file.TSDiagnostics()
 
@@ -177,14 +157,15 @@ func (files *Files) TSDiagnostics(path util.Path) transport.PublishDiagnosticsPa
 }
 
 func (files *Files) ModifyFull(path util.Path, content string) {
-	files.mu.Lock()
-	f, ok := files.fs[path]
+
+	f, ok := files.GetFromPath(path)
 	if !ok {
 		logging.Logger.Error("file to modify not in file store", "path", path)
 		files.mu.Unlock()
 		return
 	}
 
+	files.mu.Lock()
 	f.mu.Lock()
 	f.Content = []byte(content)
 	f.mu.Unlock()
@@ -194,8 +175,8 @@ func (files *Files) ModifyFull(path util.Path, content string) {
 
 func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Range, content string) {
 	logging.Logger.Info("Applying Incremental Change", "path", path)
-	files.mu.Lock()
-	f, ok := files.fs[path]
+
+	f, ok := files.GetFromPath(path)
 	if !ok {
 		logging.Logger.Error("file to modify not in file store", "path", path)
 		files.mu.Unlock()
@@ -206,6 +187,7 @@ func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Rang
 	logging.Logger.Info("Incremental Change Parameters ", "range", changeRange, "content", content)
 	logging.Logger.Info("Before/After Incremental Change", "before", string(f.Content), "after", result)
 
+	files.mu.Lock()
 	f.mu.Lock()
 	f.Content = []byte(result)
 	f.mu.Unlock()
@@ -214,39 +196,57 @@ func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Rang
 }
 
 func (files *Files) CloseFromURI(uri util.URI) {
-	path, err := util.URI2path(uri)
+	handle, err := util.FromURI(uri)
 	if err != nil {
 		logging.Logger.Error("CloseFromURI error", "error", err)
 		return
 	}
-	files.Close(path)
+	files.Close(handle)
 }
 
-func (files *Files) Close(path util.Path) {
+func (files *Files) CloseFromPath(path util.Path) {
+	handle := util.FromPath(path)
+	files.Close(handle)
+}
+
+func (files *Files) Close(handle util.Handle) {
 	files.mu.Lock()
-	f, ok := files.fs[path]
+	f, ok := files.fs[handle]
 	if !ok {
-		logging.Logger.Error("file to close not in file store", "path", path)
+		logging.Logger.Error("file to close not in file store", "handle", handle)
 		files.mu.Unlock()
 		return
 	}
 	f.mu.Lock()
-	f.Open = false
 	f.mu.Unlock()
 	files.mu.Unlock()
 }
 
-func (files *Files) Remove(path util.Path) {
+func (files *Files) RemoveFromPath(path util.Path) {
+	handle := util.FromPath(path)
 	files.mu.Lock()
-	delete(files.fs, path)
+	delete(files.fs, handle)
+	files.mu.Unlock()
+}
+
+func (files *Files) RemoveFromURI(uri util.URI) {
+	handle, _ := util.FromURI(uri)
+	files.mu.Lock()
+	delete(files.fs, handle)
+	files.mu.Unlock()
+}
+
+func (files *Files) Remove(handle util.Handle) {
+	files.mu.Lock()
+	delete(files.fs, handle)
 	files.mu.Unlock()
 }
 
 func (files *Files) String() string {
 	str := ""
-	for path := range files.fs {
-		if IsFaustFile(path) {
-			str += fmt.Sprintf("Files has %s\n", path)
+	for handle := range files.fs {
+		if IsFaustFile(handle.Path) {
+			str += fmt.Sprintf("Files has %s\n", handle)
 		}
 	}
 	return str

@@ -25,7 +25,7 @@ func (w *Workspace) Rel2Abs(relPath string) util.Path {
 func (w *Workspace) cleanDiagnostics(s *Server) {
 	for _, f := range w.Files {
 		f.mu.RLock()
-		path := f.Path
+		path := f.Handle.Path
 		f.mu.RUnlock()
 		if IsFaustFile(path) {
 			w.DiagnoseFile(path, s)
@@ -36,17 +36,18 @@ func (w *Workspace) cleanDiagnostics(s *Server) {
 func (w *Workspace) sendCompilerDiagnostics(s *Server) {
 	for _, filePath := range w.config.ProcessFiles {
 		path := filepath.Join(w.Root, filePath)
-		f, ok := s.Files.Get(path)
-		f.mu.RLock()
-		logging.Logger.Info("Generating Compiler Diagnostics", "temp_path", f.TempPath)
-		f.mu.RUnlock()
+		f, ok := s.Files.GetFromPath(path)
 
 		if ok {
+			f.mu.RLock()
+			tempPath := w.TempDirPath(f.Handle.Path)
+			logging.Logger.Info("Generating Compiler Diagnostics", "temp_path", tempPath)
+			f.mu.RUnlock()
 			if !f.hasSyntaxErrors {
 				var diagnosticErrors = []transport.Diagnostic{}
 				uri := util.Path2URI(path)
-				logging.Logger.Info("Generating Compiler Diagnostics", "temp_path", f.TempPath)
-				diagnosticError := getCompilerDiagnostics(f.TempPath, w.Root, w.config)
+				logging.Logger.Info("Generating Compiler Diagnostics", "temp_path", tempPath)
+				diagnosticError := getCompilerDiagnostics(tempPath, w.Root, w.config)
 				if diagnosticError.Message != "" {
 					diagnosticErrors = []transport.Diagnostic{diagnosticError}
 				}

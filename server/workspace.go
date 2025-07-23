@@ -43,6 +43,10 @@ type Workspace struct {
 	mu       sync.Mutex
 	TDEvents chan TDEvent
 	config   FaustProjectConfig
+
+	// Temporary directory where this workspace is replicated
+	tempDir     util.Path
+	openedFiles map[util.Handle]struct{}
 }
 
 func IsFaustFile(path util.Path) bool {
@@ -60,15 +64,22 @@ func IsLibFile(path util.Path) bool {
 	return ext == ".lib"
 }
 
+func (workspace *Workspace) TempDirPath(filePath util.Path) util.Path {
+	result := filepath.Join(workspace.tempDir, filePath)
+	return result
+}
+
 func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 	// Open all files in workspace and add to File Store
 	workspace.Files = make(map[util.Path]*File)
 	workspace.TDEvents = make(chan TDEvent)
+	workspace.openedFiles = make(map[util.Handle]struct{})
+	workspace.tempDir = s.tempDir
 
 	// Replicate Workspace in our Temp Dir by copying
 	logging.Logger.Info("Current workspace root", "path", workspace.Root)
-	folder := filepath.Base(workspace.Root)
-	tempWorkspacePath := filepath.Join(s.tempDir, folder)
+
+	tempWorkspacePath := filepath.Join(s.tempDir, workspace.Root)
 	err := cp.Copy(workspace.Root, tempWorkspacePath)
 	if err != nil {
 		logging.Logger.Error("Copying file error", "error", err)
@@ -84,28 +95,15 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 			return err
 		}
 		if !info.IsDir() {
-			_, ok := s.Files.Get(path)
+			_, ok := s.Files.GetFromPath(path)
 
 			if !ok {
 				// Path relative to workspace
-				relPath := path[len(workspace.Root)+1:]
-				workspaceFolderName := filepath.Base(workspace.Root)
-				tempDirFilePath := filepath.Join(s.tempDir, workspaceFolderName, relPath)
-
 				logging.Logger.Info("Opening file from workspace\n", "path", path)
 
-				s.Files.OpenFromPath(path, workspace.Root, false, "", tempDirFilePath)
+				s.Files.OpenFromPath(path)
 				workspace.addFileFromFileStore(path, s)
 
-				// Create Import Tree
-				// TODO: Implement updating this import tree
-				workspace.CreateImportTree(&s.Files, relPath, workspace.Root)
-
-				// Parse Symbols to Symbol Store
-				file, _ := s.Files.Get(path)
-				s.Files.mu.Lock()
-				ParseSymbolsToStore(file, s)
-				s.Files.mu.Unlock()
 				workspace.DiagnoseFile(path, s)
 			}
 		}
@@ -121,7 +119,7 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 
 func (workspace *Workspace) loadConfigFiles(s *Server) {
 	configFilePath := filepath.Join(workspace.Root, faustConfigFile)
-	f, ok := s.Files.Get(configFilePath)
+	f, ok := s.Files.GetFromPath(configFilePath)
 	var cfg FaustProjectConfig
 	var err error
 	if ok {
@@ -133,10 +131,8 @@ func (workspace *Workspace) loadConfigFiles(s *Server) {
 		}
 	} else {
 		// Try opening file if not opened but it exists
-		relPath := configFilePath[len(workspace.Root)+1:]
-		tempDirFilePath := filepath.Join(s.tempDir, filepath.Base(workspace.Root), relPath)
-		s.Files.OpenFromPath(configFilePath, workspace.Root, false, "", tempDirFilePath)
-		f, ok := s.Files.Get(configFilePath)
+		s.Files.OpenFromPath(configFilePath)
+		f, ok := s.Files.GetFromPath(configFilePath)
 		if ok {
 			f.mu.RLock()
 			cfg, err = workspace.parseConfig(f.Content)
@@ -170,13 +166,14 @@ func (workspace *Workspace) StartTrackingChanges(ctx context.Context, s *Server)
 	}
 
 	// Recursively add directories to watchlist
+	watcher.Add(workspace.Root)
 	err = filepath.Walk(workspace.Root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if info.IsDir() {
 			watcher.Add(path)
-			logging.Logger.Info("Watching file in workspace %s\n", path, workspace.Root)
+			logging.Logger.Info("Adding directory to watcher\n", path, workspace.Root)
 		}
 		return nil
 	})
@@ -219,19 +216,10 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 		origPath = event.Name
 	}
 
-	// Temporary Directory to use
-	tempDir := s.tempDir
-
-	// If file of this path is already open in File Store, ignore this event
-	file, ok := s.Files.Get(origPath)
-	if ok {
-		file.mu.RLock()
-		open := file.Open
-		file.mu.RUnlock()
-		if open {
-
-			return
-		}
+	// If file of this path is already opened by editor, ignore this HandleDiskEvent
+	_, open := workspace.openedFiles[util.FromPath(origPath)]
+	if open {
+		return
 	}
 
 	// Path relative to workspace
@@ -243,12 +231,10 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 		workspace.cleanDiagnostics(s)
 	}
 
-	// Workspace Folder name
-	workspaceFolderName := filepath.Base(workspace.Root)
-
 	// The equivalent of the workspace file path for the temporary directory
-	// Should be of the form TEMP_DIR/WORKSPACE_FOLDER_NAME/relPath
-	tempDirFilePath := filepath.Join(tempDir, workspaceFolderName, relPath)
+	// Should be of the form TEMP_DIR/WORKSPACE_ROOT_PATH/relPath
+	tempDirFilePath := workspace.TempDirPath(origPath)
+	logging.Logger.Info("Got disk event for file", "path", origPath, "temp", tempDirFilePath, "event", event)
 
 	// OS CREATE Event
 	if event.Has(fsnotify.Create) {
@@ -269,7 +255,7 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 				watcher.Add(origPath)
 			} else {
 				// Add it our server tracking and workspace
-				s.Files.OpenFromPath(origPath, s.Workspace.Root, false, "", tempDirFilePath)
+				s.Files.OpenFromPath(origPath)
 
 				// Create File
 				f, err := os.Create(tempDirFilePath)
@@ -284,7 +270,7 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 		} else {
 			// Rename Create
 			oldFileRelPath := event.RenamedFrom[len(workspace.Root)+1:]
-			oldTempPath := filepath.Join(tempDir, workspaceFolderName, oldFileRelPath)
+			oldTempPath := filepath.Join(workspace.tempDir, workspace.Root, oldFileRelPath)
 
 			if util.IsValidPath(tempDirFilePath) && util.IsValidPath(oldTempPath) {
 				err := os.Rename(oldTempPath, tempDirFilePath)
@@ -304,7 +290,7 @@ func (workspace *Workspace) HandleDiskEvent(event fsnotify.Event, s *Server, wat
 	// OS REMOVE Event
 	if event.Has(fsnotify.Remove) {
 		// Remove from File Store, Workspace and Temp Directory
-		s.Files.Remove(origPath)
+		s.Files.RemoveFromPath(origPath)
 		workspace.removeFile(origPath)
 		os.Remove(tempDirFilePath)
 	}
@@ -331,13 +317,12 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 		workspace.cleanDiagnostics(s)
 	}
 
-	file, ok := s.Files.Get(origFilePath)
+	file, ok := s.Files.GetFromPath(origFilePath)
 	if !ok {
 		logging.Logger.Error("File should've been in File Store.", "path", origFilePath)
 	}
 
-	workspaceFolderName := filepath.Base(workspace.Root)
-	tempDirFilePath := filepath.Join(tempDir, workspaceFolderName, file.RelPath) // Construct the temporary file path
+	tempDirFilePath := filepath.Join(tempDir, workspace.Root, file.RelPath) // Construct the temporary file path
 	switch change.Type {
 	case TDOpen:
 		// Ensure directory exists before creating file. This mirrors the workspace's directory structure in the temp directory.
@@ -366,22 +351,28 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 	case TDClose:
 		// Sync file from disk on close if it exists and replicate it to temporary directory, else remove from Files Store
 		if util.IsValidPath(origFilePath) { // Check if the file path is valid
-			s.Files.OpenFromPath(origFilePath, s.Workspace.Root, false, "", tempDirFilePath) // Reload the file from the specified path.
+			s.Files.OpenFromPath(origFilePath) // Reload the file from the specified path.
 
-			file, ok := s.Files.Get(origFilePath) // Retrieve the file again (unnecessary, can use the previous `file`)
+			file, ok := s.Files.GetFromPath(origFilePath) // Retrieve the file again (unnecessary, can use the previous `file`)
 			if ok {
 				os.WriteFile(tempDirFilePath, file.Content, os.FileMode(os.O_TRUNC)) // Write content to temporary file, replicating it from disk.
 			}
 			workspace.addFileFromFileStore(origFilePath, s)
 		} else {
-			s.Files.Remove(origFilePath) // Remove the file from the file store if the path isn't valid
+			s.Files.RemoveFromPath(origFilePath) // Remove the file from the file store if the path isn't valid
 		}
 
 	}
 }
 
+func (workspace *Workspace) EditorOpenFile(uri util.URI, files *Files) {
+	files.OpenFromURI(uri)
+	handle, _ := util.FromURI(uri)
+	workspace.openedFiles[handle] = struct{}{}
+}
+
 func (workspace *Workspace) addFileFromFileStore(path util.Path, s *Server) {
-	file, _ := s.Files.Get(path)
+	file, _ := s.Files.GetFromPath(path)
 	workspace.mu.Lock()
 	workspace.Files[path] = file
 	workspace.mu.Unlock()
@@ -391,6 +382,7 @@ func (w *Workspace) DiagnoseFile(path util.Path, s *Server) {
 	if IsFaustFile(path) {
 		logging.Logger.Info("Diagnosing File", "path", path)
 		params := s.Files.TSDiagnostics(path)
+		logging.Logger.Info("Got Diagnose File", "params", params)
 		if params.URI != "" {
 			s.diagChan <- params
 		}

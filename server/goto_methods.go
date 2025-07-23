@@ -9,7 +9,7 @@ import (
 	"github.com/carn181/faustlsp/util"
 )
 
-func Definition(ctx context.Context, s *Server, par json.RawMessage) (json.RawMessage, error) {
+func GetDefinition(ctx context.Context, s *Server, par json.RawMessage) (json.RawMessage, error) {
 	// TODO: Work on this function
 	var params transport.DefinitionParams
 	json.Unmarshal(par, &params)
@@ -21,7 +21,7 @@ func Definition(ctx context.Context, s *Server, par json.RawMessage) (json.RawMe
 		return []byte{}, err
 	}
 
-	f, ok := s.Files.Get(path)
+	f, ok := s.Files.GetFromPath(path)
 	if !ok {
 		logging.Logger.Error("File should've been in server file store", "path", path)
 	}
