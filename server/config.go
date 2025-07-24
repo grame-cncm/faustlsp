@@ -35,7 +35,7 @@ func (w *Workspace) cleanDiagnostics(s *Server) {
 }
 
 func (w *Workspace) sendCompilerDiagnostics(s *Server) {
-	for _, filePath := range w.config.ProcessFiles {
+	for _, filePath := range w.Config.ProcessFiles {
 		path := filepath.Join(w.Root, filePath)
 		f, ok := s.Files.GetFromPath(path)
 
@@ -48,7 +48,7 @@ func (w *Workspace) sendCompilerDiagnostics(s *Server) {
 				var diagnosticErrors = []transport.Diagnostic{}
 				uri := util.Path2URI(path)
 				logging.Logger.Info("Generating Compiler Diagnostics", "temp_path", tempPath)
-				diagnosticError := getCompilerDiagnostics(tempPath, w.Root, w.config)
+				diagnosticError := getCompilerDiagnostics(tempPath, w.Root, w.Config)
 				if diagnosticError.Message != "" {
 					diagnosticErrors = []transport.Diagnostic{diagnosticError}
 				}

@@ -2,8 +2,8 @@ github.com/carn181/fsnotify v0.0.0-20250612182652-935ca6b92412 h1:TiwX7yYt063HeL
 github.com/carn181/fsnotify v0.0.0-20250612182652-935ca6b92412/go.mod h1:LyOAO9e2FjZ61JNmsn+7dI4jg0+yhHPg6+cGTVqSxqU=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/khiner/tree-sitter-faust v0.0.0-20250613222316-aa033eb46c3b h1:jmeKGHQyKQ+Pm/Tr/ZaXz4KPB/vUbFPlDtPerNxb2jw=
-github.com/khiner/tree-sitter-faust v0.0.0-20250613222316-aa033eb46c3b/go.mod h1:u7eaf+8hwLapBvCSzDa6seDS84XGHi/74SGTFMi+VRg=
+github.com/khiner/tree-sitter-faust v0.0.0-20250701002309-122dd1019192 h1:OhO0SzXfxs0Pd3wk3EJNSLBQ7WZiNe/GVc+WmZlK874=
+github.com/khiner/tree-sitter-faust v0.0.0-20250701002309-122dd1019192/go.mod h1:u7eaf+8hwLapBvCSzDa6seDS84XGHi/74SGTFMi+VRg=
 github.com/mattn/go-pointer v0.0.1 h1:n+XhsuGeVO6MEAp7xyEukFINEa+Quek5psIR/ylA6o0=
 github.com/mattn/go-pointer v0.0.1/go.mod h1:2zXcozF6qYGgmsG+SeTZz3oAbFLdD3OWqnUbNvJZAlc=
 github.com/otiai10/copy v1.14.1 h1:5/7E6qsUMBaH5AnQ0sSLzzTg1oTECmcCmT6lvF45Na8=

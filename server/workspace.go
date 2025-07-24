@@ -38,7 +38,7 @@ type Workspace struct {
 	Files    WorkspaceFiles
 	mu       sync.Mutex
 	TDEvents chan TDEvent
-	config   FaustProjectConfig
+	Config   FaustProjectConfig
 
 	// Temporary directory where this workspace is replicated
 	tempDir     util.Path
@@ -91,17 +91,21 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 			return err
 		}
 		if !info.IsDir() {
-			_, ok := s.Files.GetFromPath(path)
+			f, ok := s.Files.GetFromPath(path)
 
 			if !ok {
 				// Path relative to workspace
 				logging.Logger.Info("Opening file from workspace\n", "path", path)
 
 				s.Files.OpenFromPath(path)
+
 				workspace.addFile(path)
+
+				f, _ = s.Files.GetFromPath(path)
 
 				workspace.DiagnoseFile(path, s)
 			}
+			workspace.AnalyzeFile(f, &s.Store)
 		}
 		return nil
 	})
@@ -140,7 +144,7 @@ func (workspace *Workspace) loadConfigFiles(s *Server) {
 			cfg = workspace.defaultConfig()
 		}
 	}
-	workspace.config = cfg
+	workspace.Config = cfg
 	logging.Logger.Info("Workspace Config", "config", cfg)
 }
 
@@ -383,7 +387,7 @@ func (w *Workspace) DiagnoseFile(path util.Path, s *Server) {
 		}
 		if len(params.Diagnostics) == 0 {
 			// Compiler Diagnostics if exists
-			if w.config.CompilerDiagnostics {
+			if w.Config.CompilerDiagnostics {
 				logging.Logger.Info("Generating Compiler errors as no syntax errors")
 				w.sendCompilerDiagnostics(s)
 			}

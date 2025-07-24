@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,78 +14,185 @@ import (
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
-// Types for Symbols
 type SymbolKind int
 
 const (
+	// Definition is a simple variable or function along with expression
 	Definition SymbolKind = iota
+
+	// Function has single scope for arguments along with expression
+	Function
+
+	// Pattern scope has multiple scopes and expressions for each rule.
+	Case
+
+	// Just like Function, but without identifier
+	CaseRule
+
+	// with and letrec environments have scope as well as expression
 	WithEnvironment
 	LetRecEnvironment
-	Case
-	Iteration
+
+	// Environment has a scope along with identifier it is assigned to
 	Environment
+
+	// Library has a file path along with identifier it is assigned to
 	Library
+
+	// Import simply has a file path
+	Import
 )
 
-type Symbol interface {
-	Name() string
-	Kind() int
-	Location() transport.Location
-	SetLocation(transport.Location)
-
-	Scope() *Scope
-	SetScope(*Scope)
+var symbolKindStrings = map[SymbolKind]string{
+	Definition:        "Definition",
+	Function:          "Function",
+	Case:              "Case",
+	CaseRule:          "CaseRule",
+	WithEnvironment:   "WithEnvironment",
+	LetRecEnvironment: "LetRecEnvironment",
+	Environment:       "Environment",
+	Library:           "Library",
+	Import:            "Import",
 }
 
-type Scope struct {
-	Parent  *Scope
-	Symbols map[string]Symbol
+func (k SymbolKind) String() string {
+	s, ok := symbolKindStrings[k]
+	if ok {
+		return s
+	}
+	return "UnknownSymbolKind"
 }
 
-func NewScope(parent *Scope) *Scope {
-	return &Scope{
-		Parent:  parent,
-		Symbols: make(map[string]Symbol),
+type Symbol struct {
+	Kind  SymbolKind
+	Loc   Location
+	Ident string
+	Scope *Scope
+
+	// For Case's CaseRules
+	Children []Symbol
+
+	// Useful for populating reference map after parsing AST
+	Expr *tree_sitter.Node
+
+	// File path to import scope from
+	File util.Path
+}
+
+func NewDefinition(Loc Location, Ident string, Expr *tree_sitter.Node) Symbol {
+	return Symbol{
+		Kind:  Definition,
+		Loc:   Loc,
+		Ident: Ident,
+		Expr:  Expr,
 	}
 }
 
-// BaseSymbol provides common fields for embedding in concrete symbol types.
-type BaseSymbol struct {
-	N   string
-	K   SymbolKind
-	Loc Location
-	Scp *Scope
+func NewFunction(Loc Location, Ident string, Scope *Scope, Expr *tree_sitter.Node) Symbol {
+	return Symbol{
+		Kind:  Function,
+		Loc:   Loc,
+		Ident: Ident,
+		Scope: Scope,
+		Expr:  Expr,
+	}
+}
+
+func NewCase(Loc Location, Scope *Scope, Children []Symbol, Expr *tree_sitter.Node) Symbol {
+	return Symbol{
+		Kind: Case,
+		Loc:  Loc,
+		// For Case Rules
+		Children: Children,
+		Expr:     Expr,
+	}
+}
+
+func NewCaseRule(Loc Location, Scope *Scope, Expr *tree_sitter.Node) Symbol {
+	return Symbol{
+		Kind:  CaseRule,
+		Loc:   Loc,
+		Scope: Scope,
+		Expr:  Expr,
+	}
+}
+
+func NewWithEnvironment(Loc Location, Scope *Scope, Expr *tree_sitter.Node) Symbol {
+	return Symbol{
+		Kind:  WithEnvironment,
+		Loc:   Loc,
+		Scope: Scope,
+		Expr:  Expr,
+	}
+}
+
+func NewLetRecEnvironment(Loc Location, Scope *Scope, Expr *tree_sitter.Node) Symbol {
+	return Symbol{
+		Kind:  LetRecEnvironment,
+		Loc:   Loc,
+		Scope: Scope,
+		Expr:  Expr,
+	}
+}
+
+func NewEnvironment(Loc Location, Ident string, Scope *Scope) Symbol {
+	return Symbol{
+		Kind:  Environment,
+		Ident: Ident,
+		Loc:   Loc,
+		Scope: Scope,
+	}
+}
+
+func NewLibrary(Loc Location, importedFile util.Path, Ident string) Symbol {
+	return Symbol{
+		Kind:  Library,
+		Ident: Ident,
+		Loc:   Loc,
+		File:  importedFile,
+	}
+}
+
+func NewImport(Loc Location, importedFile util.Path) Symbol {
+	return Symbol{
+		Kind: Import,
+		Loc:  Loc,
+		File: importedFile,
+	}
 }
 
 type Location struct {
-	File     util.Handle
-	Position transport.Range
+	File  util.Path
+	Range transport.Range
 }
 
-func (b *BaseSymbol) Name() string             { return b.N }
-func (b *BaseSymbol) Kind() SymbolKind         { return b.K }
-func (b *BaseSymbol) Location() Location       { return b.Loc }
-func (b *BaseSymbol) SetLocation(loc Location) { b.Loc = loc }
-func (b *BaseSymbol) Scope() *Scope            { return b.Scp }
-func (b *BaseSymbol) SetScope(s *Scope)        { b.Scp = s }
-
-type IdentifierSymbol struct {
-	BaseSymbol
+type Scope struct {
+	Parent   *Scope
+	Symbols  []*Symbol
+	Children []*Scope
 }
 
-type EnvironmentSymbol struct {
-	BaseSymbol
-	Scope *Scope
+func (s *Scope) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.Any("symbols", s.Symbols),
+	)
 }
 
-type LibrarySymbol struct {
-	BaseSymbol
-	File util.Path
+func NewScope(parent *Scope) *Scope {
+	scope := Scope{
+		Parent:   parent,
+		Symbols:  []*Symbol{},
+		Children: []*Scope{},
+	}
+	if parent != nil {
+		parent.Children = append(parent.Children, &scope)
+	}
+
+	return &scope
 }
 
-type ImportSymbol struct {
-	BaseSymbol
-	File util.Path
+func (scope *Scope) addSymbol(sym *Symbol) {
+	scope.Symbols = append(scope.Symbols, sym)
 }
 
 // DependencyGraph manages the import relationships between files.
@@ -169,12 +277,256 @@ type ReferenceMap struct {
 
 type Store struct {
 	mu           sync.Mutex
-	Files        Files
+	Files        *Files
 	References   ReferenceMap
 	Dependencies DependencyGraph
 }
 
-func ParseFileAndAddToStore(f *File, s *Server) {
+// This needs workspace to be able to resolve the file path
+// Analyzes AST of a File and updates the store
+func (workspace *Workspace) AnalyzeFile(f *File, store *Store) {
+	// 1) First parse AST to our Symbols + descend into imports and analyzefiles that it imports
+	// 2) Update Dependency Graph as we traverse
+	// 3) After 1) and 2) are done, resolve all symbols as references
+
+	var visited = make(map[util.Path]struct{})
+
+	workspace.ParseFile(f, store, visited)
+}
+
+func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Path]struct{}) {
+	f.mu.RLock()
+	tree := parser.ParseTree(f.Content)
+	root := tree.RootNode()
+	scope := NewScope(nil)
+	visited[f.Handle.Path] = struct{}{}
+	workspace.ParseASTNode(root, f, scope, store, visited)
+	f.mu.RUnlock()
+	tree.Close()
+}
+
+func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *File, scope *Scope, store *Store, visited map[util.Path]struct{}) {
+	// Parse Symbols recursively. Map from tree_sitter.Node -> a Symbol type
+	if node == nil {
+		logging.Logger.Error("AST Parsing Traversal Error: Node is nil", "node", node)
+		return
+	}
+
+	name := node.GrammarName()
+
+	switch name {
+	case "definition":
+		logging.Logger.Info("AST Traversal: Got definition")
+
+		value := node.ChildByFieldName("value")
+		ident := node.ChildByFieldName("variable")
+		if value == nil {
+			logging.Logger.Info("AST Traversal: Got definition without value. Ignoring.")
+			return
+		}
+
+		valueGrammarName := value.GrammarName()
+		identName := ident.Utf8Text(currentFile.Content)
+
+		if valueGrammarName == "library" {
+			logging.Logger.Info("AST Traversal: Got library")
+
+			fileName := value.ChildByFieldName("filename")
+			if fileName == nil {
+				logging.Logger.Error("AST Traversal: Library definition without filename", "node", node)
+				return
+			}
+
+			libraryFilePath := stripQuotes(fileName.Utf8Text(currentFile.Content))
+			sym := NewLibrary(Location{
+				File:  currentFile.Handle.Path,
+				Range: ToRange(ident),
+			}, libraryFilePath, identName)
+			scope.addSymbol(&sym)
+			logging.Logger.Info("Current scope values", "scope", scope)
+
+			// TODO: Recursively parse the library file if it exists
+
+		} else if valueGrammarName == "environment" {
+			logging.Logger.Info("AST Traversal: Got environment")
+			// Move to the environment node. For some reason, the environment node is the next sibling of the value node, which is just the "environment" keyword
+			value = value.NextSibling()
+			envScope := NewScope(scope)
+
+			// Value = (environment) node
+			for i := uint(0); i < value.ChildCount(); i++ {
+				// Parse each child of environment node
+				logging.Logger.Info("AST Traversal: Parsing environment child", "child", value.Child(i).GrammarName())
+				workspace.ParseASTNode(value.Child(i), currentFile, envScope, store, visited)
+			}
+			sym := NewEnvironment(
+				Location{
+					File:  currentFile.Handle.Path,
+					Range: ToRange(ident),
+				},
+				identName,
+				envScope,
+			)
+			scope.addSymbol(&sym)
+		} else {
+			if ident == nil {
+				logging.Logger.Info("AST Traversal: Got definition without identifier. Ignoring.")
+				return
+			}
+
+			sym := NewDefinition(
+				Location{
+					File:  currentFile.Handle.Path,
+					Range: ToRange(ident),
+				},
+				identName,
+				value)
+			scope.addSymbol(&sym)
+			logging.Logger.Info("Current symbol's expression", "expr", sym.Expr.GrammarName())
+			logging.Logger.Info("Current scope values", "scope", scope)
+			for i := uint(0); i < node.ChildCount(); i++ {
+				workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited)
+			}
+		}
+	case "function_definition":
+		logging.Logger.Info("AST Traversal: Got function_definition")
+
+		// Treat it as a part of a pattern scope because arguments defined are only in function scope
+
+		for i := uint(0); i < node.ChildCount(); i++ {
+			workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited)
+		}
+	case "recinition":
+		logging.Logger.Info("AST Traversal: Got recinition")
+		ident := node.ChildByFieldName("name")
+		expr := node.ChildByFieldName("expression")
+
+		if ident == nil || expr == nil {
+			logging.Logger.Error("AST Traversal: Recinition without ident or expr", "node is nil", ident == nil, "expr is nil", expr == nil)
+			return
+		}
+		sym := NewDefinition(
+			Location{
+				File:  currentFile.Handle.Path,
+				Range: ToRange(ident),
+			},
+			ident.Utf8Text(currentFile.Content),
+			expr)
+		scope.addSymbol(&sym)
+		logging.Logger.Info("Current scope values", "scope", scope)
+
+	case "with_environment":
+		logging.Logger.Info("AST Traversal: Got with environment", "text", node.Utf8Text(currentFile.Content))
+
+		expr := node.ChildByFieldName("expression")
+
+		if expr == nil {
+			logging.Logger.Error("AST Traversal: Environment without expression. Skipping")
+			return
+		}
+		environment := node.ChildByFieldName("local_environment")
+		if environment == nil {
+			logging.Logger.Error("AST Traversal: Environment without local_environment. Skipping")
+			return
+		}
+
+		withScope := NewScope(scope)
+		for i := uint(0); i < environment.ChildCount(); i++ {
+			logging.Logger.Info("AST Traversal: Parsing child", "child", environment.Child(i).GrammarName())
+			workspace.ParseASTNode(environment.Child(i), currentFile, withScope, store, visited)
+		}
+
+		sym := NewWithEnvironment(Location{
+			File:  currentFile.Handle.Path,
+			Range: ToRange(environment),
+		}, withScope, expr)
+		scope.addSymbol(&sym)
+		logging.Logger.Info("Current scope values", "scope", scope)
+
+	case "letrec_environment":
+		logging.Logger.Info("AST Traversal: Got letrec environment", "text", node.Utf8Text(currentFile.Content))
+		expr := node.ChildByFieldName("expression")
+		if expr == nil {
+			logging.Logger.Error("AST Traversal: LetRec environment without expression. Skipping")
+			return
+		}
+		environment := node.ChildByFieldName("local_environment")
+		if environment == nil {
+			logging.Logger.Error("AST Traversal: LetRec environment without local_environment. Skipping")
+			return
+		}
+
+		letRecScope := NewScope(scope)
+		for i := uint(0); i < environment.ChildCount(); i++ {
+			logging.Logger.Info("AST Traversal: Parsing child", "child", environment.Child(i).GrammarName())
+			workspace.ParseASTNode(environment.Child(i), currentFile, letRecScope, store, visited)
+		}
+
+		sym := NewLetRecEnvironment(Location{
+			File:  currentFile.Handle.Path,
+			Range: ToRange(environment),
+		}, letRecScope, expr)
+		scope.addSymbol(&sym)
+		logging.Logger.Info("Current scope values", "scope", scope)
+
+	// Import statement
+	case "file_import":
+		fileNode := node.ChildByFieldName("filename")
+		if fileNode == nil {
+			logging.Logger.Info("AST Traversal: Got import statement without importing file. Ignoring.")
+			return
+		}
+
+		// Strip quotes as file name comes as "file_name" not just file_name in tree_sitter grammar
+		file := stripQuotes(fileNode.Utf8Text(currentFile.Content))
+		resolvedPath, _ := workspace.ResolveFilePath(file, workspace.Root)
+		logging.Logger.Info("AST Traversal: Got import statement", "file", resolvedPath)
+
+		sym := NewImport(
+			Location{
+				File:  currentFile.Handle.Path,
+				Range: ToRange(node),
+			},
+			resolvedPath)
+		scope.addSymbol(&sym)
+		logging.Logger.Info("Current scope values", "scope", scope)
+		// TODO: Recursively parse the imported file if it exists
+
+	case "iteration":
+		logging.Logger.Info("AST Traversal: Got iteration node")
+
+		for i := uint(0); i < node.ChildCount(); i++ {
+			workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited)
+		}
+	case "pattern":
+		logging.Logger.Info("AST Traversal: Got pattern node")
+
+		for i := uint(0); i < node.ChildCount(); i++ {
+			workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited)
+		}
+	default:
+		for i := uint(0); i < node.ChildCount(); i++ {
+			workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited)
+		}
+	}
+}
+
+func ToRange(node *tree_sitter.Node) transport.Range {
+	start := node.StartPosition()
+	end := node.EndPosition()
+
+	return transport.Range{
+		Start: transport.Position{Line: uint32(start.Row), Character: uint32(start.Column)},
+		End:   transport.Position{Line: uint32(end.Row), Character: uint32(end.Column)},
+	}
+}
+
+func stripQuotes(s string) string {
+	stripped := s[1 : len(s)-1]
+	return stripped
+}
+
+func (workspace *Workspace) ParseFileAndAddToStore(f *File, s *Server) {
 	f.mu.RLock()
 	f.Scope = NewScope(nil)
 	// Parse through AST from f.Content
@@ -214,7 +566,7 @@ func ParseFileAndAddToStore(f *File, s *Server) {
 }
 
 func (w *Workspace) GetFaustDSPDir() string {
-	faustCommand := w.config.Command
+	faustCommand := w.Config.Command
 	_, err := exec.LookPath(faustCommand)
 	if err != nil {
 		logging.Logger.Error("Couldn't find faust command in PATH", "cmd", faustCommand)
@@ -231,7 +583,8 @@ func (w *Workspace) GetFaustDSPDir() string {
 }
 
 // Resolves a given file path like the Faust compiler does when it has to import a file
-func (w *Workspace) ResolveFilePath(relPath util.Path, rootDir util.Path) (util.Path, util.Path) {
+// Returns the path along with the directory/workspace path the file was found in
+func (w *Workspace) ResolveFilePath(relPath util.Path, rootDir util.Path) (path util.Path, dir util.Path) {
 	// File in workspace
 	path1 := filepath.Join(rootDir, relPath)
 	logging.Logger.Info("Trying path", "path", path1)

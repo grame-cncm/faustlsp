@@ -67,6 +67,7 @@ func Initialized(ctx context.Context, s *Server, par json.RawMessage) error {
 	s.Status = Running
 	go s.GenerateDiagnostics()
 	s.Files.Init(ctx, *s.Capabilities.PositionEncoding)
+	s.Store.Files = &s.Files
 	s.Workspace.Init(ctx, s)
 	logging.Logger.Info("Handling Initialized with diagnostics")
 	logging.Logger.Info("Started Diagnostic Handler")
