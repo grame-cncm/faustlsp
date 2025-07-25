@@ -17,8 +17,10 @@ import (
 type SymbolKind int
 
 const (
+	// Identifier is a simple identifier with no scope or expression
+	Identifier SymbolKind = iota
 	// Definition is a simple variable or function along with expression
-	Definition SymbolKind = iota
+	Definition
 
 	// Function has single scope for arguments along with expression
 	Function
@@ -27,7 +29,7 @@ const (
 	Case
 
 	// Just like Function, but without identifier
-	CaseRule
+	Rule
 
 	// with and letrec environments have scope as well as expression
 	WithEnvironment
@@ -44,10 +46,11 @@ const (
 )
 
 var symbolKindStrings = map[SymbolKind]string{
+	Identifier:        "Identifier",
 	Definition:        "Definition",
 	Function:          "Function",
 	Case:              "Case",
-	CaseRule:          "CaseRule",
+	Rule:              "Rule",
 	WithEnvironment:   "WithEnvironment",
 	LetRecEnvironment: "LetRecEnvironment",
 	Environment:       "Environment",
@@ -69,7 +72,7 @@ type Symbol struct {
 	Ident string
 	Scope *Scope
 
-	// For Case's CaseRules
+	// For Case's Rules
 	Children []Symbol
 
 	// Useful for populating reference map after parsing AST
@@ -77,6 +80,14 @@ type Symbol struct {
 
 	// File path to import scope from
 	File util.Path
+}
+
+func NewIdentifier(Loc Location, Ident string) Symbol {
+	return Symbol{
+		Kind:  Identifier,
+		Loc:   Loc,
+		Ident: Ident,
+	}
 }
 
 func NewDefinition(Loc Location, Ident string, Expr *tree_sitter.Node) Symbol {
@@ -98,19 +109,18 @@ func NewFunction(Loc Location, Ident string, Scope *Scope, Expr *tree_sitter.Nod
 	}
 }
 
-func NewCase(Loc Location, Scope *Scope, Children []Symbol, Expr *tree_sitter.Node) Symbol {
+func NewCase(Loc Location, Children []Symbol) Symbol {
 	return Symbol{
 		Kind: Case,
 		Loc:  Loc,
 		// For Case Rules
 		Children: Children,
-		Expr:     Expr,
 	}
 }
 
-func NewCaseRule(Loc Location, Scope *Scope, Expr *tree_sitter.Node) Symbol {
+func NewRule(Loc Location, Scope *Scope, Expr *tree_sitter.Node) Symbol {
 	return Symbol{
-		Kind:  CaseRule,
+		Kind:  Rule,
 		Loc:   Loc,
 		Scope: Scope,
 		Expr:  Expr,
@@ -170,19 +180,22 @@ type Scope struct {
 	Parent   *Scope
 	Symbols  []*Symbol
 	Children []*Scope
+	Range    transport.Range
 }
 
 func (s *Scope) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.Any("symbols", s.Symbols),
+		slog.Any("range", s.Range),
 	)
 }
 
-func NewScope(parent *Scope) *Scope {
+func NewScope(parent *Scope, scopeRange transport.Range) *Scope {
 	scope := Scope{
 		Parent:   parent,
 		Symbols:  []*Symbol{},
 		Children: []*Scope{},
+		Range:    scopeRange,
 	}
 	if parent != nil {
 		parent.Children = append(parent.Children, &scope)
@@ -298,7 +311,7 @@ func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Pa
 	f.mu.RLock()
 	tree := parser.ParseTree(f.Content)
 	root := tree.RootNode()
-	scope := NewScope(nil)
+	scope := NewScope(nil, ToRange(root))
 	visited[f.Handle.Path] = struct{}{}
 	workspace.ParseASTNode(root, f, scope, store, visited)
 	f.mu.RUnlock()
@@ -351,7 +364,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			logging.Logger.Info("AST Traversal: Got environment")
 			// Move to the environment node. For some reason, the environment node is the next sibling of the value node, which is just the "environment" keyword
 			value = value.NextSibling()
-			envScope := NewScope(scope)
+			envScope := NewScope(scope, ToRange(value))
 
 			// Value = (environment) node
 			for i := uint(0); i < value.ChildCount(); i++ {
@@ -389,7 +402,58 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			}
 		}
 	case "function_definition":
-		logging.Logger.Info("AST Traversal: Got function_definition")
+
+		functionName := node.ChildByFieldName("name")
+		if functionName == nil {
+			logging.Logger.Error("AST Traversal: Function definition without name. Skipping")
+			return
+		}
+
+		arguments := functionName.NextNamedSibling()
+		if arguments == nil {
+			logging.Logger.Error("AST Traversal: Function definition without arguments. Skipping")
+			return
+		}
+
+		argumentsScope := NewScope(scope, ToRange(node))
+		logging.Logger.Info("AST Traversal: Got function_definition", "arguments", arguments.GrammarName(), "functionName", functionName.Utf8Text(currentFile.Content))
+		for i := uint(0); i < arguments.ChildCount(); i++ {
+
+			argumentNode := arguments.Child(i)
+			if !argumentNode.IsNamed() {
+				continue
+			}
+
+			logging.Logger.Info("AST Traversal: Parsing function argument", "arg", arguments.Child(i).GrammarName())
+
+			arg := NewIdentifier(
+				Location{
+					File:  currentFile.Handle.Path,
+					Range: ToRange(argumentNode),
+				},
+				argumentNode.Utf8Text(currentFile.Content),
+			)
+			argumentsScope.addSymbol(&arg)
+		}
+
+		expression := node.ChildByFieldName("value")
+		if expression == nil {
+			logging.Logger.Error("AST Traversal: Function definition without expression. Skipping")
+			return
+		}
+
+		functionNode := NewFunction(
+			Location{
+				File:  currentFile.Handle.Path,
+				Range: ToRange(functionName),
+			},
+			functionName.Utf8Text(currentFile.Content),
+			argumentsScope,
+			expression,
+		)
+
+		scope.addSymbol(&functionNode)
+		logging.Logger.Info("Current scope values", "scope", scope)
 
 		// Treat it as a part of a pattern scope because arguments defined are only in function scope
 
@@ -430,7 +494,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			return
 		}
 
-		withScope := NewScope(scope)
+		withScope := NewScope(scope, ToRange(node))
 		for i := uint(0); i < environment.ChildCount(); i++ {
 			logging.Logger.Info("AST Traversal: Parsing child", "child", environment.Child(i).GrammarName())
 			workspace.ParseASTNode(environment.Child(i), currentFile, withScope, store, visited)
@@ -456,7 +520,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			return
 		}
 
-		letRecScope := NewScope(scope)
+		letRecScope := NewScope(scope, ToRange(node))
 		for i := uint(0); i < environment.ChildCount(); i++ {
 			logging.Logger.Info("AST Traversal: Parsing child", "child", environment.Child(i).GrammarName())
 			workspace.ParseASTNode(environment.Child(i), currentFile, letRecScope, store, visited)
@@ -528,7 +592,7 @@ func stripQuotes(s string) string {
 
 func (workspace *Workspace) ParseFileAndAddToStore(f *File, s *Server) {
 	f.mu.RLock()
-	f.Scope = NewScope(nil)
+	f.Scope = NewScope(nil, transport.Range{})
 	// Parse through AST from f.Content
 	tree := parser.ParseTree(f.Content)
 	defer tree.Close()
@@ -548,7 +612,7 @@ func (workspace *Workspace) ParseFileAndAddToStore(f *File, s *Server) {
 				switch exprType {
 				case "with_environment", "letrec_environment", "environment":
 					// TODO: Envionment symbol kind with scope
-					traverseAST(expression, NewScope(scope))
+					traverseAST(expression, NewScope(scope, transport.Range{}))
 				case "library":
 				}
 			}
