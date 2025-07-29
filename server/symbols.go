@@ -32,6 +32,9 @@ const (
 	// Just like Function, but without identifier
 	Rule
 
+	// Iteration (par, seq, sum, prod)
+	Iteration
+
 	// with and letrec environments have scope as well as expression
 	WithEnvironment
 	LetRecEnvironment
@@ -48,6 +51,7 @@ const (
 
 var symbolKindStrings = map[SymbolKind]string{
 	Identifier:        "Identifier",
+	Iteration:         "Iteration",
 	Definition:        "Definition",
 	Function:          "Function",
 	Case:              "Case",
@@ -122,6 +126,15 @@ func NewCase(Loc Location, Children []Symbol) Symbol {
 func NewRule(Loc Location, Scope *Scope, Expr *tree_sitter.Node) Symbol {
 	return Symbol{
 		Kind:  Rule,
+		Loc:   Loc,
+		Scope: Scope,
+		Expr:  Expr,
+	}
+}
+
+func NewIteration(Loc Location, Scope *Scope, Expr *tree_sitter.Node) Symbol {
+	return Symbol{
+		Kind:  Iteration,
 		Loc:   Loc,
 		Scope: Scope,
 		Expr:  Expr,
@@ -560,9 +573,40 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 	case "iteration":
 		logging.Logger.Info("AST Traversal: Got iteration node")
 
-		for i := uint(0); i < node.ChildCount(); i++ {
-			workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited)
+		currentIter := node.ChildByFieldName("current_iter")
+		if currentIter == nil {
+			logging.Logger.Error("AST Traversal: Iteration node without current_iter. Skipping")
+			return
 		}
+
+		expr := node.ChildByFieldName("expression")
+		if expr == nil {
+			logging.Logger.Error("AST Traversal: Iteration node without expression. Skipping")
+			return
+		}
+
+		// Create a new scope for the iteration
+		iterScope := NewScope(scope, ToRange(node))
+
+		currentIterIdent := NewIdentifier(
+			Location{
+				File:  currentFile.Handle.Path,
+				Range: ToRange(currentIter),
+			},
+			currentIter.Utf8Text(currentFile.Content))
+		iterScope.addSymbol(&currentIterIdent)
+
+		iterSym := NewIteration(
+			Location{
+				File:  currentFile.Handle.Path,
+				Range: ToRange(node),
+			},
+			iterScope,
+			expr)
+
+		scope.addSymbol(&iterSym)
+		logging.Logger.Info("Parsed iteration", "current_iter", currentIterIdent.Ident, "scope", iterScope)
+		logging.Logger.Info("Current scope values", "scope", scope)
 	case "pattern":
 		logging.Logger.Info("AST Traversal: Got pattern node")
 

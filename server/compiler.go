@@ -108,10 +108,14 @@ func getCompilerDiagnostics(path string, dirPath string, cfg FaustProjectConfig)
 }
 
 func parseFileError(s string) FaustError {
-	re := regexp.MustCompile(`(?s)(.+):\s*([-\d]+)\s:\sERROR\s:\s(.*)`)
+
+	// Previous
+	// re := regexp.MustCompile(`(?s)(.+):\s*([-\d]+)\s:\sERROR\s:\s(.*)`)
+	// Problem: Couldn't handle  a.dsp:8 ERROR : redefinition of symbols are not allowed : process due to missing colon after the line number
+	re := regexp.MustCompile(`(?s)(.+):\s*([-\d]+)[\s:]*\sERROR\s:\s(.*)`)
 	captures := re.FindStringSubmatch(s)
 	if len(captures) < 4 {
-		logging.Logger.Error("Expected 4 values in parseFileError", "captures", captures)
+		logging.Logger.Error("Compiler Output Regex error: Expected 4 values in parseFileError", "captures", captures)
 	}
 	line, _ := strconv.Atoi(captures[2])
 	return FaustError{File: captures[1], Line: line, Message: captures[3]}
@@ -121,7 +125,7 @@ func parseError(s string) FaustError {
 	re := regexp.MustCompile(`(?s)ERROR\s:\s(.*)`)
 	captures := re.FindStringSubmatch(s)
 	if len(captures) < 2 {
-		logging.Logger.Error("Expected 2 values in parseError", "captures", captures)
+		logging.Logger.Error("Compiler Output Regex error: Expected 2 values in parseError", "captures", captures)
 	}
 	return FaustError{Message: captures[1]}
 }
