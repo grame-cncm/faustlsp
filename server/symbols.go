@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"log/slog"
 	"os/exec"
 	"path/filepath"
@@ -565,9 +566,71 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 	case "pattern":
 		logging.Logger.Info("AST Traversal: Got pattern node")
 
-		for i := uint(0); i < node.ChildCount(); i++ {
-			workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited)
+		caseRules := []Symbol{}
+
+		rules := node.NamedChild(0)
+
+		if rules == nil {
+			logging.Logger.Error("AST Traversal: Pattern node without rules. Skipping")
+			return
 		}
+
+		for i := uint(0); i < rules.NamedChildCount(); i++ {
+			ruleNode := rules.NamedChild(i)
+
+			if ruleNode == nil {
+				logging.Logger.Error("AST Traversal: Pattern node with nil child. Skipping")
+				continue
+			}
+			logging.Logger.Info("AST Traversal: Parsing rule", "rule", ruleNode.NamedChild(0).ToSexp())
+			if ruleNode.GrammarName() != "rule" {
+				logging.Logger.Error("AST Traversal: Pattern node with non-rule child. Skipping", "child", ruleNode.GrammarName())
+				continue
+			}
+
+			arguments := ruleNode.NamedChild(0) // arguments are the first child of a rule node
+			if arguments == nil {
+				logging.Logger.Error("AST Traversal: Rule without arguments. Skipping")
+				continue
+			}
+
+			expression := ruleNode.ChildByFieldName("expression")
+			if expression == nil {
+				logging.Logger.Error("AST Traversal: Rule without expression. Skipping")
+				continue
+			}
+
+			ruleScope := NewScope(scope, ToRange(ruleNode))
+			for j := uint(0); j < arguments.ChildCount(); j++ {
+				argument := arguments.Child(j)
+				argumentSym := NewIdentifier(
+					Location{
+						File:  currentFile.Handle.Path,
+						Range: ToRange(argument),
+					},
+					argument.Utf8Text(currentFile.Content))
+				ruleScope.addSymbol(&argumentSym)
+			}
+
+			ruleSym := NewRule(Location{
+				File:  currentFile.Handle.Path,
+				Range: ToRange(ruleNode),
+			}, ruleScope, expression)
+
+			caseRules = append(caseRules, ruleSym)
+			logging.Logger.Info("AST Traversal: Parsed rule", "rule", ruleSym.Ident, "scope", ruleSym.Scope)
+		}
+
+		caseSymbol := NewCase(
+			Location{
+				File:  currentFile.Handle.Path,
+				Range: ToRange(node),
+			},
+			caseRules)
+		scope.addSymbol(&caseSymbol)
+
+		logging.Logger.Info("AST Traversal: Parsed pattern", "case_rules", len(caseSymbol.Children))
+		logging.Logger.Info("Current scope values", "scope", scope)
 	default:
 		for i := uint(0); i < node.ChildCount(); i++ {
 			workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited)
@@ -665,4 +728,37 @@ func (w *Workspace) ResolveFilePath(relPath util.Path, rootDir util.Path) (path 
 	}
 
 	return "", ""
+}
+
+func FindDefinition(ident string, scope *Scope, store *Store) (Location, error) {
+	// Keep looking up in scope to find symbol
+	// Question: How do we handle library symbols ?
+	// Solution: os.osc. Split at first . and find symbol at left. Then recursively find symbol at right in the library definition's file
+	// Normal import statements is just looking in upper scope.
+	// Note: To avoid cycles, keep track of traversed files
+	if scope == nil {
+		return Location{}, fmt.Errorf("Invalid scope")
+	}
+
+	for _, symbol := range scope.Symbols {
+		if symbol.Kind == Import {
+			f, ok := store.Files.GetFromPath(symbol.File)
+			if ok {
+				found, err := FindDefinition(ident, f.Scope, store)
+				if err != nil {
+					return found, nil
+				}
+			}
+		}
+		if symbol.Ident == ident {
+			return symbol.Loc, nil
+		}
+	}
+
+	if scope.Parent != nil {
+		return FindDefinition(ident, scope.Parent, store)
+	} else {
+		return Location{}, fmt.Errorf("Couldn't find symbol")
+	}
+
 }
