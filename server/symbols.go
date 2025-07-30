@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -239,7 +240,15 @@ type DependencyGraph struct {
 	processing map[string]bool
 }
 
-// AddDependency records that 'importerURI' imports 'importedURI'.
+func NewDependencyGraph() DependencyGraph {
+	return DependencyGraph{
+		imports:    make(map[string]map[string]struct{}),
+		importedBy: make(map[string]map[string]struct{}),
+		processing: make(map[string]bool),
+	}
+}
+
+// AddDependency records that 'importerPath' imports 'importedPath'.
 func (dg *DependencyGraph) AddDependency(importerPath, importedPath util.Path) {
 	dg.mu.Lock()
 	defer dg.mu.Unlock()
@@ -261,11 +270,11 @@ func (dg *DependencyGraph) RemoveDependenciesForFile(path util.Path) {
 	defer dg.mu.Unlock()
 
 	// Remove its outgoing dependencies
-	if importedURIs, ok := dg.imports[path]; ok {
-		for importedURI := range importedURIs {
-			delete(dg.importedBy[importedURI], path) // Remove self from imported's list
-			if len(dg.importedBy[importedURI]) == 0 {
-				delete(dg.importedBy, importedURI) // Clean up empty sets
+	if importedPaths, ok := dg.imports[path]; ok {
+		for importedPath := range importedPaths {
+			delete(dg.importedBy[importedPath], path) // Remove self from imported's list
+			if len(dg.importedBy[importedPath]) == 0 {
+				delete(dg.importedBy, importedPath) // Clean up empty sets
 			}
 		}
 		delete(dg.imports, path) // Remove its own entry
@@ -307,6 +316,7 @@ type Store struct {
 	Files        *Files
 	References   ReferenceMap
 	Dependencies DependencyGraph
+	Cache        map[[sha256.Size]byte]*Scope
 }
 
 // This needs workspace to be able to resolve the file path
@@ -319,17 +329,34 @@ func (workspace *Workspace) AnalyzeFile(f *File, store *Store) {
 	var visited = make(map[util.Path]struct{})
 
 	workspace.ParseFile(f, store, visited)
+
+	logging.Logger.Info("AST Parsing completed for file", "file", f.Handle.Path)
+	logging.Logger.Info("Dependency Graph", "graph", store.Dependencies.imports)
 }
 
 func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Path]struct{}) {
-	f.mu.RLock()
-	tree := parser.ParseTree(f.Content)
-	root := tree.RootNode()
-	scope := NewScope(nil, ToRange(root))
-	visited[f.Handle.Path] = struct{}{}
-	workspace.ParseASTNode(root, f, scope, store, visited)
-	f.mu.RUnlock()
-	tree.Close()
+	// If file is already visited, skip it
+	if _, ok := visited[f.Handle.Path]; !ok {
+		f.mu.RLock()
+		// Check if file content of this type is already parsed
+		scope, ok := store.Cache[f.Hash]
+		if ok {
+			logging.Logger.Info("File already parsed, using cached scope", "file", f.Handle.Path)
+			f.Scope = scope
+			f.mu.RUnlock()
+		} else {
+
+			tree := parser.ParseTree(f.Content)
+			root := tree.RootNode()
+			scope := NewScope(nil, ToRange(root))
+			visited[f.Handle.Path] = struct{}{}
+			workspace.ParseASTNode(root, f, scope, store, visited)
+			f.mu.RUnlock()
+			//			tree.Close()
+		}
+	} else {
+		logging.Logger.Info("Skipping file as it is already visited", "file", f.Handle.Path)
+	}
 }
 
 func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *File, scope *Scope, store *Store, visited map[util.Path]struct{}) {
@@ -365,14 +392,27 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			}
 
 			libraryFilePath := stripQuotes(fileName.Utf8Text(currentFile.Content))
+			resolvedPath, _ := workspace.ResolveFilePath(libraryFilePath, workspace.Root)
+			f, ok := store.Files.GetFromPath(resolvedPath)
+			logging.Logger.Info("AST Traversal: Got library definition", "file", resolvedPath, "ident", identName)
+			if ok {
+				workspace.ParseFile(f, store, visited)
+			} else {
+				store.Files.OpenFromPath(resolvedPath)
+				f, ok := store.Files.GetFromPath(resolvedPath)
+				if ok {
+					workspace.ParseFile(f, store, visited)
+				}
+			}
+			logging.Logger.Info("AST Traversal: Got library definition", "file", resolvedPath, "ident", identName)
+			store.Dependencies.AddDependency(currentFile.Handle.Path, resolvedPath)
+
 			sym := NewLibrary(Location{
 				File:  currentFile.Handle.Path,
 				Range: ToRange(ident),
-			}, libraryFilePath, identName)
+			}, resolvedPath, identName)
 			scope.addSymbol(&sym)
 			logging.Logger.Info("Current scope values", "scope", scope)
-
-			// TODO: Recursively parse the library file if it exists
 
 		} else if valueGrammarName == "environment" {
 			logging.Logger.Info("AST Traversal: Got environment")
@@ -510,7 +550,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 
 		withScope := NewScope(scope, ToRange(node))
 		for i := uint(0); i < environment.ChildCount(); i++ {
-			logging.Logger.Info("AST Traversal: Parsing child", "child", environment.Child(i).GrammarName())
+			logging.Logger.Info("AST Traversal: Parsing environment definition", "child", environment.Child(i).GrammarName())
 			workspace.ParseASTNode(environment.Child(i), currentFile, withScope, store, visited)
 		}
 
@@ -558,7 +598,20 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 		// Strip quotes as file name comes as "file_name" not just file_name in tree_sitter grammar
 		file := stripQuotes(fileNode.Utf8Text(currentFile.Content))
 		resolvedPath, _ := workspace.ResolveFilePath(file, workspace.Root)
-		logging.Logger.Info("AST Traversal: Got import statement", "file", resolvedPath)
+		logging.Logger.Info("AST Traversal: Got import statement. Going through tree", "file", resolvedPath)
+		f, ok := store.Files.GetFromPath(resolvedPath)
+		if ok {
+			workspace.ParseFile(f, store, visited)
+		} else {
+			store.Files.OpenFromPath(resolvedPath)
+			f, ok := store.Files.GetFromPath(resolvedPath)
+			if ok {
+				workspace.ParseFile(f, store, visited)
+			}
+
+		}
+
+		store.Dependencies.AddDependency(currentFile.Handle.Path, resolvedPath)
 
 		sym := NewImport(
 			Location{
@@ -626,7 +679,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 				logging.Logger.Error("AST Traversal: Pattern node with nil child. Skipping")
 				continue
 			}
-			logging.Logger.Info("AST Traversal: Parsing rule", "rule", ruleNode.NamedChild(0).ToSexp())
+
 			if ruleNode.GrammarName() != "rule" {
 				logging.Logger.Error("AST Traversal: Pattern node with non-rule child. Skipping", "child", ruleNode.GrammarName())
 				continue
@@ -637,6 +690,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 				logging.Logger.Error("AST Traversal: Rule without arguments. Skipping")
 				continue
 			}
+			logging.Logger.Info("AST Traversal: Parsing rule", "rule", arguments.ToSexp())
 
 			expression := ruleNode.ChildByFieldName("expression")
 			if expression == nil {
@@ -702,7 +756,7 @@ func (workspace *Workspace) ParseFileAndAddToStore(f *File, s *Server) {
 	f.Scope = NewScope(nil, transport.Range{})
 	// Parse through AST from f.Content
 	tree := parser.ParseTree(f.Content)
-	defer tree.Close()
+	//	defer tree.Close()
 	root := tree.RootNode()
 
 	var traverseAST func(node *tree_sitter.Node, scope *Scope)

@@ -105,7 +105,8 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 
 				workspace.DiagnoseFile(path, s)
 			}
-			workspace.AnalyzeFile(f, &s.Store)
+			// Test if goroutine speeds this up
+			go workspace.AnalyzeFile(f, &s.Store)
 		}
 		return nil
 	})
