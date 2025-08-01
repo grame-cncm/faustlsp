@@ -144,12 +144,12 @@ func (s *Server) Loop(ctx context.Context, end chan<- error) {
 
 		// Dispatch to Method Handler
 
-		// Might add other methods here
-		// If exit or shutdown, don't run concurrently and change state for loop to end
-		if method != "exit" && method != "shutdown" {
-			go s.HandleMethod(ctx, method, msg)
-		} else {
+		// Handle important lifecycle messages non-concurrently
+		switch method {
+		case "exit", "shutdown", "initialize", "initialized":
 			s.HandleMethod(ctx, method, msg)
+		default:
+			go s.HandleMethod(ctx, method, msg)
 		}
 	}
 	if s.Status == ExitError {

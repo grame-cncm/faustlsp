@@ -381,6 +381,7 @@ func (workspace *Workspace) addFile(path util.Path) {
 func (w *Workspace) DiagnoseFile(path util.Path, s *Server) {
 	if IsFaustFile(path) {
 		logging.Logger.Info("Diagnosing File", "path", path)
+
 		params := s.Files.TSDiagnostics(path)
 		logging.Logger.Info("Got Diagnose File", "params", params)
 		if params.URI != "" {
