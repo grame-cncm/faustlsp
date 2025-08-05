@@ -846,6 +846,58 @@ func FindDefinitionHelper(ident string, scope *Scope, store *Store, visited *map
 
 }
 
+func FindEnvironmentIdent(ident string, scope *Scope, store *Store) (util.Path, error) {
+	// Keep looking up in scope to find symbol
+	// Question: How do we handle library symbols ?
+	// Solution: os.osc. Split at first . and find symbol at left. Then recursively find symbol at right in the library definition's file
+	// Normal import statements is just looking in upper scope.
+	// Note: To avoid cycles, keep track of traversed files
+
+	var visited = make(map[util.Path]struct{})
+
+	return FindEnvironmentHelper(ident, scope, store, &visited)
+}
+
+func FindEnvironmentHelper(ident string, scope *Scope, store *Store, visited *map[util.Path]struct{}) (util.Path, error) {
+	if scope == nil {
+		return "", fmt.Errorf("Invalid scope")
+	}
+
+	// 1) Check current scope's definitions for this symbol
+	for _, symbol := range scope.Symbols {
+
+		if symbol.Ident == ident {
+			return symbol.File, nil
+		}
+	}
+
+	// 2) Check imported files for this symbol
+	// TODO: Instead of 2 loops, get import symbols in the first loop itself and iterate through that
+	logging.Logger.Info("Symbol not in scope, checking import statements")
+	for i, symbol := range scope.Symbols {
+
+		if symbol.Kind == Import {
+			logging.Logger.Info("Symbol type", "type", symbol.Kind.String(), "index", i)
+			f, ok := store.Files.GetFromPath(symbol.File)
+			if ok {
+				logging.Logger.Info("Found import statement, checking in file", "path", f.Handle.Path)
+				found, err := FindEnvironmentHelper(ident, f.Scope, store, visited)
+				if err == nil {
+					return found, nil
+				}
+			}
+		}
+	}
+
+	if scope.Parent != nil {
+		logging.Logger.Info("Going to parent to find", "ident", ident)
+		return FindEnvironmentHelper(ident, scope.Parent, store, visited)
+	} else {
+		return "", fmt.Errorf("Couldn't find symbol")
+	}
+
+}
+
 func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope) {
 	// TODO: Implement this manually following valid characters for identifier instead of using tree_sitter as it is computationally expensive
 	tree := parser.ParseTree(content)
@@ -855,6 +907,25 @@ func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope)
 	logging.Logger.Info("Got descendant node as", "type", node.GrammarName(), "content", node.Utf8Text(content))
 	switch node.GrammarName() {
 	case "identifier":
+		// If parent is access, keep finding scopes for each environment monoidically (e.g. lib.moo.foo.lay.f will be lib->moo->foo->lay->f)
+
+		// 1) Find outermost parent
+		outerMostParent := node
+		for {
+			parent := outerMostParent.Parent()
+			if parent != nil {
+				if parent.GrammarName() == "access" {
+					outerMostParent = parent
+					continue
+				}
+			}
+			break
+		}
+
+		if outerMostParent.GrammarName() == "access" {
+			node = outerMostParent
+		}
+
 		identString := node.Utf8Text(content)
 		// Get Node range and find smallest scope that contains it
 		identStart := node.StartPosition()

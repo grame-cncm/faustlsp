@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/carn181/faustlsp/logging"
 	"github.com/carn181/faustlsp/transport"
@@ -39,7 +40,33 @@ func GetDefinition(ctx context.Context, s *Server, par json.RawMessage) (json.Ra
 		// Couldn't find symbol to lookup
 		return []byte{}, nil
 	}
-	loc, err := FindDefinition(ident, scope, &s.Store)
+
+	var loc Location
+	identSplit := strings.Split(ident, ".")
+	if len(identSplit) > 1 {
+		logging.Logger.Info("Resolving library symbol", "symbol", identSplit)
+		for _, libIdent := range identSplit {
+			loc, err := FindEnvironmentIdent(libIdent, scope, &s.Store)
+			if err != nil {
+				break
+			}
+			logging.Logger.Info("Resolved library environment", "env", libIdent, "location", loc)
+			f, ok := s.Store.Files.GetFromPath(loc)
+			if ok {
+				f.mu.RLock()
+				logging.Logger.Info("Setting New Scope to", "path", loc)
+				scope = f.Scope
+				f.mu.RUnlock()
+				if scope == nil {
+					break
+				}
+			}
+		}
+	}
+	ident = identSplit[len(identSplit)-1]
+
+	loc, err = FindDefinition(ident, scope, &s.Store)
+
 	logging.Logger.Info("Got definition as", "location", loc, "error", err)
 	if err == nil {
 		fileLocation := transport.Location{
