@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"os"
 
@@ -69,6 +70,7 @@ func Initialized(ctx context.Context, s *Server, par json.RawMessage) error {
 	s.Files.Init(ctx, *s.Capabilities.PositionEncoding)
 	s.Store.Files = &s.Files
 	s.Store.Dependencies = NewDependencyGraph()
+	s.Store.Cache = make(map[[sha256.Size]byte]*Scope)
 	s.Workspace.Init(ctx, s)
 	logging.Logger.Info("Handling Initialized with diagnostics")
 	logging.Logger.Info("Started Diagnostic Handler")

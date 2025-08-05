@@ -26,7 +26,7 @@ This will install a `faustlsp` executable in `$HOME/go/bin`.
 - [ ] Code Completion
 - [x] Document Symbols
 - [x] Formatting (using [faustfmt](https://github.com/carn181/faustfmt))
-- [ ] Goto Definition
+- [x] Goto Definition
 - [ ] Find References
 
 # Configuration

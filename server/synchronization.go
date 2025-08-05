@@ -38,6 +38,7 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	logging.Logger.Info("Current File", "content", f.Content)
 
 	s.Workspace.TDEvents <- TDEvent{Type: TDOpen, Path: f.Handle.Path}
+
 	f.mu.RUnlock()
 	return nil
 }
@@ -56,6 +57,7 @@ func TextDocumentChangeFull(ctx context.Context, s *Server, par json.RawMessage)
 		s.Files.ModifyFull(path, change.Text)
 	}
 	s.Workspace.TDEvents <- TDEvent{Type: TDChange, Path: path}
+
 	logging.Logger.Info("Modified File", "fileURI", string(fileURI))
 	return nil
 }
@@ -75,6 +77,7 @@ func TextDocumentChangeIncremental(ctx context.Context, s *Server, par json.RawM
 	}
 
 	s.Workspace.TDEvents <- TDEvent{Type: TDChange, Path: path}
+
 	return nil
 }
 

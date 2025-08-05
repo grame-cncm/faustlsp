@@ -326,6 +326,7 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 	tempDirFilePath := filepath.Join(tempDir, origFilePath) // Construct the temporary file path
 	switch change.Type {
 	case TDOpen:
+		// TODO: Implement opening new file also
 		// Ensure directory exists before creating file. This mirrors the workspace's directory structure in the temp directory.
 		dirPath := filepath.Dir(tempDirFilePath)
 		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
@@ -348,7 +349,9 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 		os.WriteFile(tempDirFilePath, file.Content, fs.FileMode(os.O_TRUNC)) // Write the file content to the temp file, overwriting existing content
 		content, _ := os.ReadFile(tempDirFilePath)
 		logging.Logger.Info("Current state of file", "path", tempDirFilePath, "content", string(content))
+		go s.Workspace.AnalyzeFile(file, &s.Store)
 		workspace.DiagnoseFile(origFilePath, s)
+
 	case TDClose:
 		// Sync file from disk on close if it exists and replicate it to temporary directory, else remove from Files Store
 		if util.IsValidPath(origFilePath) { // Check if the file path is valid

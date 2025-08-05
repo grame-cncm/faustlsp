@@ -354,14 +354,16 @@ func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Pa
 			f.mu.RUnlock()
 			f.mu.Lock()
 			f.Scope = scope
+			store.Cache[f.Hash] = scope
 			f.mu.Unlock()
 
 			//			tree.Close()
+			logging.Logger.Info("Parsed file", "path", f.Handle.Path)
 		}
 	} else {
 		//		logging.Logger.Info("Skipping file as it is already visited", "file", f.Handle.Path)
 	}
-	logging.Logger.Info("Parsed file", "path", f.Handle.Path)
+
 }
 
 func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *File, scope *Scope, store *Store, visited map[util.Path]struct{}) {
