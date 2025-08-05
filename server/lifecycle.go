@@ -44,7 +44,7 @@ func Initialize(ctx context.Context, s *Server, par json.RawMessage) (json.RawMe
 				},
 			},
 			DocumentFormattingProvider: &transport.Or_ServerCapabilities_documentFormattingProvider{Value: true},
-			//			DefinitionProvider:         &transport.Or_ServerCapabilities_definitionProvider{Value: true},
+			DefinitionProvider:         &transport.Or_ServerCapabilities_definitionProvider{Value: true},
 		},
 		ServerInfo: &transport.ServerInfo{Name: "faust-lsp", Version: "0.0.1"},
 	}

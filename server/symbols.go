@@ -327,7 +327,7 @@ func (workspace *Workspace) AnalyzeFile(f *File, store *Store) {
 	// 3) After 1) and 2) are done, resolve all symbols as references
 
 	var visited = make(map[util.Path]struct{})
-
+	logging.Logger.Info("Starting to analyze file", "path", f.Handle.Path)
 	workspace.ParseFile(f, store, visited)
 
 	logging.Logger.Info("AST Parsing completed for file", "file", f.Handle.Path)
@@ -352,11 +352,16 @@ func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Pa
 			visited[f.Handle.Path] = struct{}{}
 			workspace.ParseASTNode(root, f, scope, store, visited)
 			f.mu.RUnlock()
-			tree.Close()
+			f.mu.Lock()
+			f.Scope = scope
+			f.mu.Unlock()
+
+			//			tree.Close()
 		}
 	} else {
 		//		logging.Logger.Info("Skipping file as it is already visited", "file", f.Handle.Path)
 	}
+	logging.Logger.Info("Parsed file", "path", f.Handle.Path)
 }
 
 func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *File, scope *Scope, store *Store, visited map[util.Path]struct{}) {
@@ -795,29 +800,96 @@ func FindDefinition(ident string, scope *Scope, store *Store) (Location, error) 
 	// Solution: os.osc. Split at first . and find symbol at left. Then recursively find symbol at right in the library definition's file
 	// Normal import statements is just looking in upper scope.
 	// Note: To avoid cycles, keep track of traversed files
+
+	var visited = make(map[util.Path]struct{})
+
+	return FindDefinitionHelper(ident, scope, store, &visited)
+}
+
+func FindDefinitionHelper(ident string, scope *Scope, store *Store, visited *map[util.Path]struct{}) (Location, error) {
 	if scope == nil {
 		return Location{}, fmt.Errorf("Invalid scope")
 	}
 
+	// 1) Check current scope's definitions for this symbol
 	for _, symbol := range scope.Symbols {
-		if symbol.Kind == Import {
-			f, ok := store.Files.GetFromPath(symbol.File)
-			if ok {
-				found, err := FindDefinition(ident, f.Scope, store)
-				if err != nil {
-					return found, nil
-				}
-			}
-		}
+
 		if symbol.Ident == ident {
 			return symbol.Loc, nil
 		}
 	}
 
+	// 2) Check imported files for this symbol
+	// TODO: Instead of 2 loops, get import symbols in the first loop itself and iterate through that
+	logging.Logger.Info("Symbol not in scope, checking import statements")
+	for i, symbol := range scope.Symbols {
+
+		if symbol.Kind == Import {
+			logging.Logger.Info("Symbol type", "type", symbol.Kind.String(), "index", i)
+			f, ok := store.Files.GetFromPath(symbol.File)
+			if ok {
+				logging.Logger.Info("Found import statement, checking in file", "path", f.Handle.Path)
+				found, err := FindDefinitionHelper(ident, f.Scope, store, visited)
+				if err == nil {
+					return found, nil
+				}
+			}
+		}
+	}
+
 	if scope.Parent != nil {
-		return FindDefinition(ident, scope.Parent, store)
+		logging.Logger.Info("Going to parent to find", "ident", ident)
+		return FindDefinitionHelper(ident, scope.Parent, store, visited)
 	} else {
 		return Location{}, fmt.Errorf("Couldn't find symbol")
 	}
 
+}
+
+func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope) {
+	// TODO: Implement this manually following valid characters for identifier instead of using tree_sitter as it is computationally expensive
+	tree := parser.ParseTree(content)
+	fileAST := tree.RootNode()
+	defer tree.Close()
+	node := fileAST.DescendantForByteRange(offset, offset)
+	logging.Logger.Info("Got descendant node as", "type", node.GrammarName(), "content", node.Utf8Text(content))
+	switch node.GrammarName() {
+	case "identifier":
+		identString := node.Utf8Text(content)
+		// Get Node range and find smallest scope that contains it
+		identStart := node.StartPosition()
+		identEnd := node.EndPosition()
+
+		identRange := transport.Range{
+			Start: transport.Position{Line: uint32(identStart.Row), Character: uint32(identStart.Column)},
+			End:   transport.Position{Line: uint32(identEnd.Row), Character: uint32(identEnd.Column)},
+		}
+
+		lowestScope := FindLowestScopeContainingRange(scope, identRange)
+
+		return identString, lowestScope
+	}
+
+	return "", nil
+}
+
+func FindLowestScopeContainingRange(scope *Scope, identRange transport.Range) *Scope {
+	if scope != nil {
+		for _, childScope := range scope.Children {
+			logging.Logger.Info("Looking in child scope to find lowest scope")
+			if childScope != nil {
+				if rangeContains(scope.Range, childScope.Range) {
+					return FindLowestScopeContainingRange(childScope, identRange)
+				}
+			}
+		}
+	}
+
+	return scope
+}
+
+func rangeContains(parent transport.Range, child transport.Range) bool {
+	below := parent.Start.Line <= child.Start.Line && parent.Start.Character <= child.Start.Character
+	above := child.End.Line <= parent.End.Line && child.End.Character <= parent.End.Character
+	return above && below
 }

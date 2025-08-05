@@ -233,8 +233,8 @@ var requestHandlers = map[string]func(context.Context, *Server, json.RawMessage)
 	"initialize":                  Initialize,
 	"textDocument/documentSymbol": TextDocumentSymbol,
 	"textDocument/formatting":     Formatting,
-	//	"textDocument/definition":     GetDefinition,
-	"shutdown": ShutdownEnd,
+	"textDocument/definition":     GetDefinition,
+	"shutdown":                    ShutdownEnd,
 }
 
 // Map from method to method handler for request methods
