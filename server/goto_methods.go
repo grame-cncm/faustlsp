@@ -38,7 +38,7 @@ func GetDefinition(ctx context.Context, s *Server, par json.RawMessage) (json.Ra
 
 	if ident == "" {
 		// Couldn't find symbol to lookup
-		return []byte{}, nil
+		return []byte("null"), nil
 	}
 
 	var loc Location
@@ -79,5 +79,5 @@ func GetDefinition(ctx context.Context, s *Server, par json.RawMessage) (json.Ra
 		}
 	}
 
-	return []byte{}, nil
+	return []byte("null"), nil
 }
