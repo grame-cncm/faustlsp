@@ -38,8 +38,11 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	logging.Logger.Info("Current File", "content", f.Content)
 
 	s.Workspace.TDEvents <- TDEvent{Type: TDOpen, Path: f.Handle.Path}
-
 	f.mu.RUnlock()
+
+//	go s.Workspace.AnalyzeFile(f, &s.Store)
+	go s.Workspace.DiagnoseFile(f.Handle.Path, s)
+
 	return nil
 }
 

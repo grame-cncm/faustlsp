@@ -233,7 +233,8 @@ type DependencyGraph struct {
 
 	// Reverse adjacency list: maps an imported Path to a set of Paths that import it.
 	// This is crucial for efficiently finding "dependents" when a file changes.
-	importedBy map[string]map[string]struct{}
+	// If found and string != "", it is a library import (used for reference finding)
+	importedBy map[string]map[string]string
 
 	// Tracks files currently being analyzed/processed to detect cycles.
 	// Maps file Path to true if it's currently in the analysis stack.
@@ -243,7 +244,7 @@ type DependencyGraph struct {
 func NewDependencyGraph() DependencyGraph {
 	return DependencyGraph{
 		imports:    make(map[string]map[string]struct{}),
-		importedBy: make(map[string]map[string]struct{}),
+		importedBy: make(map[string]map[string]string),
 		processing: make(map[string]bool),
 	}
 }
@@ -259,9 +260,24 @@ func (dg *DependencyGraph) AddDependency(importerPath, importedPath util.Path) {
 	dg.imports[importerPath][importedPath] = struct{}{}
 
 	if _, ok := dg.importedBy[importedPath]; !ok {
-		dg.importedBy[importedPath] = make(map[string]struct{})
+		dg.importedBy[importedPath] = make(map[string]string)
 	}
-	dg.importedBy[importedPath][importerPath] = struct{}{}
+	dg.importedBy[importedPath][importerPath] = ""
+}
+
+func (dg *DependencyGraph) AddLibraryDependency(importerPath, importedPath util.Path, library string) {
+	dg.mu.Lock()
+	defer dg.mu.Unlock()
+
+	if _, ok := dg.imports[importerPath]; !ok {
+		dg.imports[importerPath] = make(map[string]struct{})
+	}
+	dg.imports[importerPath][importedPath] = struct{}{}
+
+	if _, ok := dg.importedBy[importedPath]; !ok {
+		dg.importedBy[importedPath] = make(map[string]string)
+	}
+	dg.importedBy[importedPath][importerPath] = library
 }
 
 // Call this before re-analyzing a file, as its imports might have changed.
@@ -337,13 +353,13 @@ func (workspace *Workspace) AnalyzeFile(f *File, store *Store) {
 func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Path]struct{}) {
 	// If file is already visited, skip it
 	if _, ok := visited[f.Handle.Path]; !ok {
-		f.mu.RLock()
+		f.mu.Lock()
 		// Check if file content of this type is already parsed
 		scope, ok := store.Cache[f.Hash]
 		if ok {
 			logging.Logger.Info("File already parsed, using cached scope", "file", f.Handle.Path)
 			f.Scope = scope
-			f.mu.RUnlock()
+			f.mu.Unlock()
 		} else {
 
 			tree := parser.ParseTree(f.Content)
@@ -351,8 +367,6 @@ func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Pa
 			scope := NewScope(nil, ToRange(root))
 			visited[f.Handle.Path] = struct{}{}
 			workspace.ParseASTNode(root, f, scope, store, visited)
-			f.mu.RUnlock()
-			f.mu.Lock()
 			f.Scope = scope
 			store.Cache[f.Hash] = scope
 			f.mu.Unlock()
@@ -361,7 +375,7 @@ func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Pa
 			logging.Logger.Info("Parsed file", "path", f.Handle.Path)
 		}
 	} else {
-		//		logging.Logger.Info("Skipping file as it is already visited", "file", f.Handle.Path)
+		logging.Logger.Info("Skipping file as it is already visited", "file", f.Handle.Path)
 	}
 
 }
@@ -412,7 +426,8 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 				}
 			}
 			//logging.Logger.Info("AST Traversal: Got library definition", "file", resolvedPath, "ident", identName)
-			store.Dependencies.AddDependency(currentFile.Handle.Path, resolvedPath)
+			store.Dependencies.RemoveDependenciesForFile(currentFile.Handle.Path)
+			store.Dependencies.AddLibraryDependency(currentFile.Handle.Path, resolvedPath, identName)
 
 			sym := NewLibrary(Location{
 				File:  currentFile.Handle.Path,
@@ -618,6 +633,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 
 		}
 
+		store.Dependencies.RemoveDependenciesForFile(currentFile.Handle.Path)
 		store.Dependencies.AddDependency(currentFile.Handle.Path, resolvedPath)
 
 		sym := NewImport(

@@ -55,10 +55,12 @@ func (f *File) DocumentSymbols() []transport.DocumentSymbol {
 }
 
 func (f *File) TSDiagnostics() transport.PublishDiagnosticsParams {
+	logging.Logger.Info("Waiting for lock", "file", f.Handle.Path)
 	f.mu.Lock()
-	defer f.mu.Unlock()
+
+	logging.Logger.Info("Got lock", "file", f.Handle.Path)
 	t := parser.ParseTree(f.Content)
-	//	defer t.Close()
+
 	errors := parser.TSDiagnostics(f.Content, t)
 	if len(errors) == 0 {
 		f.hasSyntaxErrors = false
@@ -69,6 +71,7 @@ func (f *File) TSDiagnostics() transport.PublishDiagnosticsParams {
 		URI:         transport.DocumentURI(f.Handle.URI),
 		Diagnostics: errors,
 	}
+	f.mu.Unlock()
 	return d
 }
 

@@ -251,6 +251,35 @@ func GetQueryMatches(queryStr string, code []byte, tree *tree_sitter.Tree) TSQue
 	return result
 }
 
+func GetQueryMatchesFromNode(queryStr string, code []byte, node *tree_sitter.Node) TSQueryResult {
+	if node == nil {
+		return TSQueryResult{}
+	}
+	query, _ := tree_sitter.NewQuery(tsParser.language, queryStr)
+	defer query.Close()
+
+	cursor := tree_sitter.NewQueryCursor()
+	defer cursor.Close()
+
+	matches := cursor.Matches(query, node, code)
+
+	var result TSQueryResult
+	result.Results = make(map[string][]tree_sitter.Node)
+	for match := matches.Next(); match != nil; match = matches.Next() {
+		for _, capture := range match.Captures {
+			//			fmt.Printf("Match %d, Capture %d (%s): %s\n", match.PatternIndex, capture.Index, query.CaptureNames()[capture.Index], capture.Node.Utf8Text(code))
+
+			// Add to result
+			captureName := query.CaptureNames()[capture.Index]
+			captures, _ := result.Results[captureName]
+			node := capture.Node
+			result.Results[captureName] = append(captures, node)
+		}
+	}
+
+	return result
+}
+
 func Close() {
 	//	tsParser.parser.Close()
 }

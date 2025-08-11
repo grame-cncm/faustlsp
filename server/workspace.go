@@ -106,7 +106,9 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 				workspace.DiagnoseFile(path, s)
 			}
 			// Test if goroutine speeds this up
-			go workspace.AnalyzeFile(f, &s.Store)
+			if IsFaustFile(f.Handle.Path) {
+				go workspace.AnalyzeFile(f, &s.Store)
+			}
 		}
 		return nil
 	})
@@ -326,8 +328,8 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 	tempDirFilePath := filepath.Join(tempDir, origFilePath) // Construct the temporary file path
 	switch change.Type {
 	case TDOpen:
-		// TODO: Implement opening new file also
 		// Ensure directory exists before creating file. This mirrors the workspace's directory structure in the temp directory.
+		// TODO: Add this and sub-directories to watcher
 		dirPath := filepath.Dir(tempDirFilePath)
 		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 			err := os.MkdirAll(dirPath, 0755) // Create the directory and all parent directories with permissions 0755
@@ -341,6 +343,13 @@ func (workspace *Workspace) HandleEditorEvent(change TDEvent, s *Server) {
 		f, err := os.Create(tempDirFilePath)
 		if err != nil {
 			logging.Logger.Error("OS create error", "error", err)
+		}
+		file, ok := s.Store.Files.GetFromPath(origFilePath)
+		if ok {
+			file.mu.RLock()
+			os.WriteFile(tempDirFilePath, file.Content, fs.FileMode(os.O_TRUNC))
+			file.mu.RUnlock()
+
 		}
 		f.Close()
 	case TDChange:
