@@ -32,7 +32,12 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	s.Workspace.EditorOpenFile(util.URI(fileURI), &s.Files)
 
 	logging.Logger.Info("Opening File", "uri", string(fileURI))
-	f, _ := s.Files.GetFromURI(util.URI(fileURI))
+	f, ok := s.Files.GetFromURI(util.URI(fileURI))
+
+	if !ok {
+		s.Files.AddFromURI(util.URI(fileURI), []byte{})
+		f, _ = s.Files.GetFromURI(util.URI(fileURI))
+	}
 
 	f.mu.RLock()
 	logging.Logger.Info("Current File", "content", f.Content)
@@ -40,7 +45,7 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 	s.Workspace.TDEvents <- TDEvent{Type: TDOpen, Path: f.Handle.Path}
 	f.mu.RUnlock()
 
-//	go s.Workspace.AnalyzeFile(f, &s.Store)
+	//	go s.Workspace.AnalyzeFile(f, &s.Store)
 	go s.Workspace.DiagnoseFile(f.Handle.Path, s)
 
 	return nil

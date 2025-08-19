@@ -84,6 +84,8 @@ type Symbol struct {
 
 	// Useful for populating reference map after parsing AST
 	Expr *tree_sitter.Node
+	// For with_environments and letrec_environments, useful for references and environment symbols
+	Expression *Scope
 
 	// File path to import scope from
 	File util.Path
@@ -143,21 +145,23 @@ func NewIteration(Loc Location, Scope *Scope, Expr *tree_sitter.Node) Symbol {
 	}
 }
 
-func NewWithEnvironment(Loc Location, Scope *Scope, Expr *tree_sitter.Node) Symbol {
+func NewWithEnvironment(Loc Location, Scope *Scope, Expr *tree_sitter.Node, Expression *Scope) Symbol {
 	return Symbol{
-		Kind:  WithEnvironment,
-		Loc:   Loc,
-		Scope: Scope,
-		Expr:  Expr,
+		Kind:       WithEnvironment,
+		Loc:        Loc,
+		Scope:      Scope,
+		Expr:       Expr,
+		Expression: Expression,
 	}
 }
 
-func NewLetRecEnvironment(Loc Location, Scope *Scope, Expr *tree_sitter.Node) Symbol {
+func NewLetRecEnvironment(Loc Location, Scope *Scope, Expr *tree_sitter.Node, Expression *Scope) Symbol {
 	return Symbol{
-		Kind:  LetRecEnvironment,
-		Loc:   Loc,
-		Scope: Scope,
-		Expr:  Expr,
+		Kind:       LetRecEnvironment,
+		Loc:        Loc,
+		Scope:      Scope,
+		Expr:       Expr,
+		Expression: Expression,
 	}
 }
 
@@ -597,14 +601,20 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 
 		withScope := NewScope(scope, ToRange(node))
 		for i := uint(0); i < environment.ChildCount(); i++ {
-			//logging.Logger.Info("AST Traversal: Parsing environment definition", "child", environment.Child(i).GrammarName())
+			//logging.Logger.Info("AST Traversal: Parsing environment depfinition", "child", environment.Child(i).GrammarName())
 			workspace.ParseASTNode(environment.Child(i), currentFile, withScope, store, visited, fileChan)
+		}
+
+		exprScope := NewScope(scope, ToRange(node))
+		for i := uint(0); i < expr.ChildCount(); i++ {
+			//logging.Logger.Info("AST Traversal: Parsing expr depfinition", "child", expr.Child(i).GrammarName())
+			workspace.ParseASTNode(expr.Child(i), currentFile, withScope, store, visited, fileChan)
 		}
 
 		sym := NewWithEnvironment(Location{
 			File:  currentFile.Handle.Path,
-			Range: ToRange(environment),
-		}, withScope, expr)
+			Range: ToRange(node),
+		}, withScope, expr, exprScope)
 		scope.addSymbol(&sym)
 		//logging.Logger.Info("Current scope values", "scope", scope)
 
@@ -627,10 +637,16 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			workspace.ParseASTNode(environment.Child(i), currentFile, letRecScope, store, visited, fileChan)
 		}
 
+		exprScope := NewScope(scope, ToRange(node))
+		for i := uint(0); i < expr.ChildCount(); i++ {
+			//logging.Logger.Info("AST Traversal: Parsing child", "child", expr.Child(i).GrammarName())
+			workspace.ParseASTNode(expr.Child(i), currentFile, exprScope, store, visited, fileChan)
+		}
+
 		sym := NewLetRecEnvironment(Location{
 			File:  currentFile.Handle.Path,
-			Range: ToRange(environment),
-		}, letRecScope, expr)
+			Range: ToRange(node),
+		}, letRecScope, expr, exprScope)
 		scope.addSymbol(&sym)
 		//logging.Logger.Info("Current scope values", "scope", scope)
 

@@ -129,6 +129,23 @@ func (files *Files) Open(handle util.Handle) {
 	files.mu.Unlock()
 }
 
+func (files *Files) AddFromURI(uri util.URI, content []byte) {
+	handle, err := util.FromURI(uri)
+	if err != nil {
+		return
+	}
+	files.Add(handle, content)
+}
+
+func (files *Files) Add(handle util.Handle, content []byte) {
+	var file = File{
+		Handle: handle, Content: content, Hash: sha256.Sum256(content),
+	}
+	files.mu.Lock()
+	files.fs[handle] = &file
+	files.mu.Unlock()
+}
+
 func (files *Files) Get(handle util.Handle) (*File, bool) {
 	files.mu.Lock()
 	file, ok := files.fs[handle]

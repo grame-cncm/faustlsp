@@ -59,5 +59,5 @@ g = case{(x:y) => y:x; (x) => x;}
 		Content: []byte(code),
 		Handle:  util.FromPath("test.dsp"),
 	}
-	s.Workspace.ParseASTNode(root, &file, nil, nil, nil)
+	s.Workspace.ParseASTNode(root, &file, nil, nil, nil, nil)
 }
