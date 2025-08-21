@@ -495,7 +495,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			sym := NewDefinition(
 				Location{
 					File:  currentFile.Handle.Path,
-					Range: ToRange(ident),
+					Range: ToRange(node),
 				},
 				identName,
 				value)
@@ -507,7 +507,6 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			}
 		}
 	case "function_definition":
-
 		functionName := node.ChildByFieldName("name")
 		if functionName == nil {
 			//logging.Logger.Error("AST Traversal: Function definition without name. Skipping")
@@ -523,13 +522,12 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 		argumentsScope := NewScope(scope, ToRange(node))
 		//logging.Logger.Info("AST Traversal: Got function_definition", "arguments", arguments.GrammarName(), "functionName", functionName.Utf8Text(currentFile.Content))
 		for i := uint(0); i < arguments.ChildCount(); i++ {
-
 			argumentNode := arguments.Child(i)
 			if !argumentNode.IsNamed() {
 				continue
 			}
 
-			//logging.Logger.Info("AST Traversal: Parsing function argument", "arg", arguments.Child(i).GrammarName())
+			//logging.Logger.Info("AST Traversal: Parsing function argument", "arg", argumentNode.GrammarName(), "content", argumentNode.Utf8Text(currentFile.Content))
 
 			arg := NewIdentifier(
 				Location{
@@ -540,6 +538,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			)
 			argumentsScope.addSymbol(&arg)
 		}
+		//logging.Logger.Info("Arguments Scope", "scope", argumentsScope.Symbols[0].Ident)
 
 		expression := node.ChildByFieldName("value")
 		if expression == nil {
@@ -550,7 +549,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 		functionNode := NewFunction(
 			Location{
 				File:  currentFile.Handle.Path,
-				Range: ToRange(functionName),
+				Range: ToRange(node),
 			},
 			functionName.Utf8Text(currentFile.Content),
 			argumentsScope,
@@ -558,12 +557,11 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 		)
 
 		scope.addSymbol(&functionNode)
-		//logging.Logger.Info("Current scope values", "scope", scope)
+		//logging.Logger.Info("Current scope values", "scope_children", len(scope.Children), "scope_symbols", len(scope.Symbols))
 
 		// Treat it as a part of a pattern scope because arguments defined are only in function scope
-
 		for i := uint(0); i < node.ChildCount(); i++ {
-			workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited, fileChan)
+			workspace.ParseASTNode(node.Child(i), currentFile, argumentsScope, store, visited, fileChan)
 		}
 	case "recinition":
 		//logging.Logger.Info("AST Traversal: Got recinition")
@@ -942,7 +940,7 @@ func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope)
 	fileAST := tree.RootNode()
 	defer tree.Close()
 	node := fileAST.DescendantForByteRange(offset, offset)
-	logging.Logger.Info("Got descendant node as", "type", node.GrammarName(), "content", node.Utf8Text(content))
+	logging.Logger.Info("Got descendant node as", "type", node.GrammarName(), "content", node.Utf8Text(content), "location", ToRange(node))
 	switch node.GrammarName() {
 	case "identifier":
 		// If parent is access, keep finding scopes for each environment monoidically (e.g. lib.moo.foo.lay.f will be lib->moo->foo->lay->f)
@@ -984,11 +982,17 @@ func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope)
 
 func FindLowestScopeContainingRange(scope *Scope, identRange transport.Range) *Scope {
 	if scope != nil {
-		for _, childScope := range scope.Children {
-			logging.Logger.Info("Looking in child scope to find lowest scope")
+		logging.Logger.Info("Scope children", "length", len(scope.Children))
+		for i, childScope := range scope.Children {
+			logging.Logger.Info("Current child scope", "no", i)
+			logging.Logger.Info("Looking in child scope to find lowest scope", "current", scope.Range, "child", childScope.Range, "target", identRange)
+			logging.Logger.Info("What is parent scope ?", "scope", scope.Symbols[0])
 			if childScope != nil {
-				if rangeContains(scope.Range, childScope.Range) {
+				if RangeContains(childScope.Range, identRange) {
+					logging.Logger.Info("Scope contains identifier", "scope", childScope.Range, "ident", identRange)
 					return FindLowestScopeContainingRange(childScope, identRange)
+				} else {
+					logging.Logger.Info("Parent scope does not contain child scope", "parent", scope.Range, "child", childScope.Range)
 				}
 			}
 		}
@@ -997,8 +1001,18 @@ func FindLowestScopeContainingRange(scope *Scope, identRange transport.Range) *S
 	return scope
 }
 
-func rangeContains(parent transport.Range, child transport.Range) bool {
-	below := parent.Start.Line <= child.Start.Line && parent.Start.Character <= child.Start.Character
-	above := child.End.Line <= parent.End.Line && child.End.Character <= parent.End.Character
-	return above && below
+func RangeContains(parent transport.Range, child transport.Range) bool {
+	// OLD
+	// below := parent.Start.Line <= child.Start.Line && parent.Start.Character <= child.Start.Character
+	// above := child.End.Line <= parent.End.Line && child.End.Character <= parent.End.Character
+	// return above && below
+
+	// NEW
+	// Failed cases: Parent: {{0, 0}, {2, 0}}, Child: {{1,0}, {1,17}}
+	start_is_between := (parent.Start.Line < child.Start.Line) ||
+		(parent.Start.Line == child.Start.Line && parent.Start.Character <= child.Start.Character)
+	end_is_between := (parent.End.Line > child.End.Line) ||
+		(parent.End.Line == child.End.Line && parent.End.Character >= child.End.Character)
+
+	return start_is_between && end_is_between
 }

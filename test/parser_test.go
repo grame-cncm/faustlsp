@@ -8,10 +8,11 @@ import (
 	"github.com/carn181/faustlsp/logging"
 	"github.com/carn181/faustlsp/parser"
 	"github.com/carn181/faustlsp/server"
+	"github.com/carn181/faustlsp/transport"
 	"github.com/carn181/faustlsp/util"
 )
 
-func TestParseImports(t *testing.T) {
+func testParseImports(t *testing.T) {
 	parser.Init()
 	code := []byte(`
 import("a.lib");
@@ -26,7 +27,7 @@ import("c.dsp");
 	}
 }
 
-func TestParseASTNode(t *testing.T) {
+func testParseASTNode(t *testing.T) {
 	logging.Logger = slog.Default()
 	parser.Init()
 	code := `
@@ -60,4 +61,35 @@ g = case{(x:y) => y:x; (x) => x;}
 		Handle:  util.FromPath("test.dsp"),
 	}
 	s.Workspace.ParseASTNode(root, &file, nil, nil, nil, nil)
+}
+
+func TestRangeContains(t *testing.T) {
+	tests := []struct {
+		name   string
+		parent transport.Range
+		child  transport.Range
+		want   bool
+	}{
+		{
+			name:   "Child has greater char range than parent",
+			parent: transport.Range{Start: transport.Position{Line: 0, Character: 0}, End: transport.Position{Line: 2, Character: 0}},
+			child:  transport.Range{Start: transport.Position{Line: 1, Character: 0}, End: transport.Position{Line: 1, Character: 17}},
+			want:   true,
+		},
+		{
+			name:   "Child has greater char range than parent",
+			parent: transport.Range{Start: transport.Position{Line: 1, Character: 2}, End: transport.Position{Line: 1, Character: 13}},
+			child:  transport.Range{Start: transport.Position{Line: 6, Character: 18}, End: transport.Position{Line: 6, Character: 19}},
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := server.RangeContains(tt.parent, tt.child)
+			if got != tt.want {
+				t.Errorf("RangeContains() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
