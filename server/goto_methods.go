@@ -36,7 +36,7 @@ func GetDefinition(ctx context.Context, s *Server, par json.RawMessage) (json.Ra
 
 	ident, scope := FindSymbolScope(f.Content, f.Scope, offset)
 
-	logging.Logger.Info("Got symbol at Location", "symbol", ident, "scope", f.Scope == nil)
+	logging.Logger.Info("Got symbol at Location", "symbol", ident, "scope_exists", f.Scope != nil)
 
 	if ident == "" {
 		// Couldn't find symbol to lookup
@@ -45,18 +45,31 @@ func GetDefinition(ctx context.Context, s *Server, par json.RawMessage) (json.Ra
 
 	var loc Location
 	identSplit := strings.Split(ident, ".")
+
 	if len(identSplit) > 1 {
 		logging.Logger.Info("Resolving library symbol", "symbol", identSplit)
-		for _, libIdent := range identSplit {
-			loc, err := FindEnvironmentIdent(libIdent, scope, &s.Store)
+		for i := range len(identSplit) - 1 {
+			libIdent := identSplit[i]
+
+			// Resolve as Environment
+			sym, err := FindEnvironmentIdent(libIdent, scope, &s.Store)
+			logging.Logger.Info("Resolved environment", "env", libIdent, "sym", sym.Ident, "loc", sym.Loc)
+			if err == nil {
+				loc = sym.Loc
+				scope = sym.Scope
+				continue
+			}
+
+			// Resolve as Library if not resolved as environment
+			file, err := FindLibraryIdent(libIdent, scope, &s.Store)
 			if err != nil {
 				break
 			}
-			logging.Logger.Info("Resolved library environment", "env", libIdent, "location", loc)
-			f, ok := s.Store.Files.GetFromPath(loc)
+			logging.Logger.Info("Resolved library environment", "env", libIdent, "location", file)
+			f, ok := s.Store.Files.GetFromPath(file)
 			if ok {
 				f.mu.RLock()
-				logging.Logger.Info("Setting New Scope to", "path", loc)
+				logging.Logger.Info("Setting New Scope to", "path", file)
 				scope = f.Scope
 				f.mu.RUnlock()
 				if scope == nil {
@@ -120,15 +133,25 @@ func GetReferences(ctx context.Context, s *Server, par json.RawMessage) (json.Ra
 	if len(identSplit) > 1 {
 		logging.Logger.Info("Resolving library symbol", "symbol", identSplit)
 		for _, libIdent := range identSplit {
-			loc, err := FindEnvironmentIdent(libIdent, scope, &s.Store)
+			// Resolve as Environment
+			sym, err := FindEnvironmentIdent(ident, scope, &s.Store)
+			logging.Logger.Info("Resolved environment", "env", libIdent, "sym", sym.Ident, "loc", sym.Loc)
+			if err == nil {
+				loc = sym.Loc
+				scope = sym.Scope
+				continue
+			}
+
+			// Resolve as Library if not resolved as environment
+			file, err := FindLibraryIdent(libIdent, scope, &s.Store)
 			if err != nil {
 				break
 			}
-			logging.Logger.Info("Resolved library environment", "env", libIdent, "location", loc)
-			f, ok := s.Store.Files.GetFromPath(loc)
+			logging.Logger.Info("Resolved library environment", "env", libIdent, "location", file)
+			f, ok := s.Store.Files.GetFromPath(file)
 			if ok {
 				f.mu.RLock()
-				logging.Logger.Info("Setting New Scope to", "path", loc)
+				logging.Logger.Info("Setting New Scope to", "path", file)
 				scope = f.Scope
 				f.mu.RUnlock()
 				if scope == nil {

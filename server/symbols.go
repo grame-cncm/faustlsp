@@ -99,22 +99,23 @@ func NewIdentifier(Loc Location, Ident string) Symbol {
 	}
 }
 
-func NewDefinition(Loc Location, Ident string, Expr *tree_sitter.Node) Symbol {
+func NewDefinition(Loc Location, Ident string, Expr *tree_sitter.Node, Expression *Scope) Symbol {
 	return Symbol{
-		Kind:  Definition,
-		Loc:   Loc,
-		Ident: Ident,
-		Expr:  Expr,
+		Kind:       Definition,
+		Loc:        Loc,
+		Ident:      Ident,
+		Expr:       Expr,
+		Expression: Expression,
 	}
 }
 
-func NewFunction(Loc Location, Ident string, Scope *Scope, Expr *tree_sitter.Node) Symbol {
+func NewFunction(Loc Location, Ident string, Scope *Scope, Expr *tree_sitter.Node, Expression *Scope) Symbol {
 	return Symbol{
-		Kind:  Function,
-		Loc:   Loc,
-		Ident: Ident,
-		Scope: Scope,
-		Expr:  Expr,
+		Kind:       Function,
+		Loc:        Loc,
+		Ident:      Ident,
+		Scope:      Scope,
+		Expression: Expression,
 	}
 }
 
@@ -419,7 +420,7 @@ func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Pa
 func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *File, scope *Scope, store *Store, visited map[util.Path]struct{}, fileChan chan string) {
 	// Parse Symbols recursively. Map from tree_sitter.Node -> a Symbol type
 	if node == nil {
-		//logging.Logger.Error("AST Parsing Traversal Error: Node is nil", "node", node)
+		logging.Logger.Error("AST Parsing Traversal Error: Node is nil", "node", node)
 		return
 	}
 
@@ -427,12 +428,12 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 
 	switch name {
 	case "definition":
-		//logging.Logger.Info("AST Traversal: Got definition")
+		logging.Logger.Info("AST Traversal: Got definition")
 
 		value := node.ChildByFieldName("value")
 		ident := node.ChildByFieldName("variable")
 		if value == nil {
-			//logging.Logger.Info("AST Traversal: Got definition without value. Ignoring.")
+			logging.Logger.Info("AST Traversal: Got definition without value. Ignoring.")
 			return
 		}
 
@@ -440,21 +441,21 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 		identName := ident.Utf8Text(currentFile.Content)
 
 		if valueGrammarName == "library" {
-			//logging.Logger.Info("AST Traversal: Got library")
+			logging.Logger.Info("AST Traversal: Got library")
 
 			fileName := value.ChildByFieldName("filename")
 			if fileName == nil {
-				//logging.Logger.Error("AST Traversal: Library definition without filename", "node", node)
+				logging.Logger.Error("AST Traversal: Library definition without filename", "node", node)
 				return
 			}
 
 			libraryFilePath := stripQuotes(fileName.Utf8Text(currentFile.Content))
 			resolvedPath, _ := workspace.ResolveFilePath(libraryFilePath, workspace.Root)
 
-			//logging.Logger.Info("AST Traversal: Got library definition", "file", resolvedPath, "ident", identName)
+			logging.Logger.Info("AST Traversal: Got library definition", "file", resolvedPath, "ident", identName)
 			fileChan <- resolvedPath
 
-			//logging.Logger.Info("AST Traversal: Got library definition", "file", resolvedPath, "ident", identName)
+			logging.Logger.Info("AST Traversal: Got library definition", "file", resolvedPath, "ident", identName)
 			store.Dependencies.RemoveDependenciesForFile(currentFile.Handle.Path)
 			store.Dependencies.AddLibraryDependency(currentFile.Handle.Path, resolvedPath, identName)
 
@@ -463,10 +464,10 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 				Range: ToRange(ident),
 			}, resolvedPath, identName)
 			scope.addSymbol(&sym)
-			//logging.Logger.Info("Current scope values", "scope", scope)
+			logging.Logger.Info("Current scope values", "scope", scope)
 
 		} else if valueGrammarName == "environment" {
-			//logging.Logger.Info("AST Traversal: Got environment")
+			logging.Logger.Info("AST Traversal: Got environment")
 			// Move to the environment node. For some reason, the environment node is the next sibling of the value node, which is just the "environment" keyword
 			value = value.NextSibling()
 			envScope := NewScope(scope, ToRange(value))
@@ -474,7 +475,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			// Value = (environment) node
 			for i := uint(0); i < value.ChildCount(); i++ {
 				// Parse each child of environment node
-				//logging.Logger.Info("AST Traversal: Parsing environment child", "child", value.Child(i).GrammarName())
+				logging.Logger.Info("AST Traversal: Parsing environment child", "child", value.Child(i).GrammarName())
 				workspace.ParseASTNode(value.Child(i), currentFile, envScope, store, visited, fileChan)
 			}
 			sym := NewEnvironment(
@@ -488,46 +489,69 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			scope.addSymbol(&sym)
 		} else {
 			if ident == nil {
-				//logging.Logger.Info("AST Traversal: Got definition without identifier. Ignoring.")
+				logging.Logger.Info("AST Traversal: Got definition without identifier. Ignoring.")
 				return
 			}
 
+			logging.Logger.Info("Current scope values", "scope", scope)
+			expr := NewScope(scope, ToRange(value))
+			for i := uint(0); i < node.ChildCount(); i++ {
+				workspace.ParseASTNode(node.Child(i), currentFile, expr, store, visited, fileChan)
+			}
 			sym := NewDefinition(
 				Location{
 					File:  currentFile.Handle.Path,
 					Range: ToRange(node),
 				},
 				identName,
-				value)
+				value, expr)
 			scope.addSymbol(&sym)
-			//logging.Logger.Info("Current symbol's expression", "expr", sym.Expr.GrammarName())
-			//logging.Logger.Info("Current scope values", "scope", scope)
-			for i := uint(0); i < node.ChildCount(); i++ {
-				workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited, fileChan)
-			}
 		}
+	case "environment":
+		logging.Logger.Info("AST Traversal: Parsing Environment without identifier", "environment", node.Utf8Text(currentFile.Content))
+		node = node.NextSibling()
+		if node == nil {
+			logging.Logger.Info("AST Traversal: Got environment without definitions. Ignoring.")
+			return
+		}
+		envScope := NewScope(scope, ToRange(node))
+
+		for i := uint(0); i < node.ChildCount(); i++ {
+			workspace.ParseASTNode(node.Child(i), currentFile, envScope, store, visited, fileChan)
+		}
+		sym := NewEnvironment(
+			Location{
+				File:  currentFile.Handle.Path,
+				Range: ToRange(node),
+			},
+			"",
+			envScope,
+		)
+		scope.addSymbol(&sym)
+		logging.Logger.Info("AST Traversal: Parsed environment", "locatio", sym.Loc)
+
 	case "function_definition":
 		functionName := node.ChildByFieldName("name")
 		if functionName == nil {
-			//logging.Logger.Error("AST Traversal: Function definition without name. Skipping")
+			logging.Logger.Error("AST Traversal: Function definition without name. Skipping")
 			return
 		}
 
 		arguments := functionName.NextNamedSibling()
 		if arguments == nil {
-			//logging.Logger.Error("AST Traversal: Function definition without arguments. Skipping")
+			logging.Logger.Error("AST Traversal: Function definition without arguments. Skipping")
 			return
 		}
 
 		argumentsScope := NewScope(scope, ToRange(node))
-		//logging.Logger.Info("AST Traversal: Got function_definition", "arguments", arguments.GrammarName(), "functionName", functionName.Utf8Text(currentFile.Content))
+		logging.Logger.Info("AST Traversal: Got function_definition", "arguments", arguments.GrammarName(), "functionName", functionName.Utf8Text(currentFile.Content))
 		for i := uint(0); i < arguments.ChildCount(); i++ {
 			argumentNode := arguments.Child(i)
 			if !argumentNode.IsNamed() {
 				continue
 			}
 
-			//logging.Logger.Info("AST Traversal: Parsing function argument", "arg", argumentNode.GrammarName(), "content", argumentNode.Utf8Text(currentFile.Content))
+			logging.Logger.Info("AST Traversal: Parsing function argument", "arg", argumentNode.GrammarName(), "content", argumentNode.Utf8Text(currentFile.Content))
 
 			arg := NewIdentifier(
 				Location{
@@ -538,12 +562,21 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			)
 			argumentsScope.addSymbol(&arg)
 		}
-		//logging.Logger.Info("Arguments Scope", "scope", argumentsScope.Symbols[0].Ident)
+		if len(argumentsScope.Symbols) > 0 {
+			logging.Logger.Info("Arguments Scope", "scope", argumentsScope.Symbols[0].Ident)
+		}
 
 		expression := node.ChildByFieldName("value")
 		if expression == nil {
-			//logging.Logger.Error("AST Traversal: Function definition without expression. Skipping")
+			logging.Logger.Error("AST Traversal: Function definition without expression. Skipping")
 			return
+		}
+
+		// Treat it as a part of a pattern scope because arguments defined are only in function scope
+		exprScope := NewScope(scope, ToRange(node))
+		logging.Logger.Info("Parsing function value using separate scope")
+		for i := uint(0); i < node.ChildCount(); i++ {
+			workspace.ParseASTNode(node.Child(i), currentFile, exprScope, store, visited, fileChan)
 		}
 
 		functionNode := NewFunction(
@@ -554,22 +587,18 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			functionName.Utf8Text(currentFile.Content),
 			argumentsScope,
 			expression,
+			exprScope,
 		)
 
 		scope.addSymbol(&functionNode)
-		//logging.Logger.Info("Current scope values", "scope_children", len(scope.Children), "scope_symbols", len(scope.Symbols))
-
-		// Treat it as a part of a pattern scope because arguments defined are only in function scope
-		for i := uint(0); i < node.ChildCount(); i++ {
-			workspace.ParseASTNode(node.Child(i), currentFile, argumentsScope, store, visited, fileChan)
-		}
+		logging.Logger.Info("Current scope values", "scope_children", len(scope.Children), "scope_symbols", len(scope.Symbols))
 	case "recinition":
-		//logging.Logger.Info("AST Traversal: Got recinition")
+		logging.Logger.Info("AST Traversal: Got recinition")
 		ident := node.ChildByFieldName("name")
 		expr := node.ChildByFieldName("expression")
 
 		if ident == nil || expr == nil {
-			//logging.Logger.Error("AST Traversal: Recinition without ident or expr", "node is nil", ident == nil, "expr is nil", expr == nil)
+			logging.Logger.Error("AST Traversal: Recinition without ident or expr", "node is nil", ident == nil, "expr is nil", expr == nil)
 			return
 		}
 		sym := NewDefinition(
@@ -578,88 +607,83 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 				Range: ToRange(ident),
 			},
 			ident.Utf8Text(currentFile.Content),
-			expr)
+			expr, nil)
 		scope.addSymbol(&sym)
-		//logging.Logger.Info("Current scope values", "scope", scope)
+		logging.Logger.Info("Current scope values", "scope", scope)
 
 	case "with_environment":
-		//logging.Logger.Info("AST Traversal: Got with environment", "text", node.Utf8Text(currentFile.Content))
+		logging.Logger.Info("AST Traversal: Got with environment", "text", node.Utf8Text(currentFile.Content))
 
 		expr := node.ChildByFieldName("expression")
 
 		if expr == nil {
-			//logging.Logger.Error("AST Traversal: Environment without expression. Skipping")
+			logging.Logger.Error("AST Traversal: Environment without expression. Skipping")
 			return
 		}
 		environment := node.ChildByFieldName("local_environment")
 		if environment == nil {
-			//logging.Logger.Error("AST Traversal: Environment without local_environment. Skipping")
+			logging.Logger.Error("AST Traversal: Environment without local_environment. Skipping")
 			return
 		}
 
 		withScope := NewScope(scope, ToRange(node))
-		for i := uint(0); i < environment.ChildCount(); i++ {
-			//logging.Logger.Info("AST Traversal: Parsing environment depfinition", "child", environment.Child(i).GrammarName())
-			workspace.ParseASTNode(environment.Child(i), currentFile, withScope, store, visited, fileChan)
+		for i := uint(0); i < environment.NamedChildCount(); i++ {
+			logging.Logger.Info("AST Traversal: Parsing environment definition", "child", environment.NamedChild(i).GrammarName())
+			workspace.ParseASTNode(environment.NamedChild(i), currentFile, withScope, store, visited, fileChan)
 		}
 
 		exprScope := NewScope(scope, ToRange(node))
-		for i := uint(0); i < expr.ChildCount(); i++ {
-			//logging.Logger.Info("AST Traversal: Parsing expr depfinition", "child", expr.Child(i).GrammarName())
-			workspace.ParseASTNode(expr.Child(i), currentFile, withScope, store, visited, fileChan)
-		}
+		logging.Logger.Info("AST Traversal: Parsing expr definition", "child", expr.GrammarName())
+		workspace.ParseASTNode(expr, currentFile, exprScope, store, visited, fileChan)
 
 		sym := NewWithEnvironment(Location{
 			File:  currentFile.Handle.Path,
 			Range: ToRange(node),
 		}, withScope, expr, exprScope)
 		scope.addSymbol(&sym)
-		//logging.Logger.Info("Current scope values", "scope", scope)
+		logging.Logger.Info("Current scope values", "scope", scope)
 
 	case "letrec_environment":
-		//logging.Logger.Info("AST Traversal: Got letrec environment", "text", node.Utf8Text(currentFile.Content))
+		logging.Logger.Info("AST Traversal: Got letrec environment", "text", node.Utf8Text(currentFile.Content))
 		expr := node.ChildByFieldName("expression")
 		if expr == nil {
-			//logging.Logger.Error("AST Traversal: LetRec environment without expression. Skipping")
+			logging.Logger.Error("AST Traversal: LetRec environment without expression. Skipping")
 			return
 		}
 		environment := node.ChildByFieldName("local_environment")
 		if environment == nil {
-			//logging.Logger.Error("AST Traversal: LetRec environment without local_environment. Skipping")
+			logging.Logger.Error("AST Traversal: LetRec environment without local_environment. Skipping")
 			return
 		}
 
 		letRecScope := NewScope(scope, ToRange(node))
 		for i := uint(0); i < environment.ChildCount(); i++ {
-			//logging.Logger.Info("AST Traversal: Parsing child", "child", environment.Child(i).GrammarName())
+			logging.Logger.Info("AST Traversal: Parsing child", "child", environment.Child(i).GrammarName())
 			workspace.ParseASTNode(environment.Child(i), currentFile, letRecScope, store, visited, fileChan)
 		}
 
 		exprScope := NewScope(scope, ToRange(node))
-		for i := uint(0); i < expr.ChildCount(); i++ {
-			//logging.Logger.Info("AST Traversal: Parsing child", "child", expr.Child(i).GrammarName())
-			workspace.ParseASTNode(expr.Child(i), currentFile, exprScope, store, visited, fileChan)
-		}
+		workspace.ParseASTNode(expr, currentFile, exprScope, store, visited, fileChan)
 
 		sym := NewLetRecEnvironment(Location{
 			File:  currentFile.Handle.Path,
 			Range: ToRange(node),
 		}, letRecScope, expr, exprScope)
 		scope.addSymbol(&sym)
-		//logging.Logger.Info("Current scope values", "scope", scope)
+		logging.Logger.Info("Current scope values", "scope", scope)
 
 	// Import statement
 	case "file_import":
 		fileNode := node.ChildByFieldName("filename")
 		if fileNode == nil {
-			//logging.Logger.Info("AST Traversal: Got import statement without importing file. Ignoring.")
+			logging.Logger.Info("AST Traversal: Got import statement without importing file. Ignoring.")
 			return
 		}
 
 		// Strip quotes as file name comes as "file_name" not just file_name in tree_sitter grammar
 		file := stripQuotes(fileNode.Utf8Text(currentFile.Content))
 		resolvedPath, _ := workspace.ResolveFilePath(file, workspace.Root)
-		//logging.Logger.Info("AST Traversal: Got import statement. Going through tree", "file", resolvedPath)
+		logging.Logger.Info("AST Traversal: Got import statement. Going through tree", "file", resolvedPath)
 
 		fileChan <- resolvedPath
 
@@ -673,21 +697,21 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			},
 			resolvedPath)
 		scope.addSymbol(&sym)
-		//logging.Logger.Info("Current scope values", "scope", scope)
+		logging.Logger.Info("Current scope values", "scope", scope)
 		// TODO: Recursively parse the imported file if it exists
 
 	case "iteration":
-		//logging.Logger.Info("AST Traversal: Got iteration node")
+		logging.Logger.Info("AST Traversal: Got iteration node")
 
 		currentIter := node.ChildByFieldName("current_iter")
 		if currentIter == nil {
-			//logging.Logger.Error("AST Traversal: Iteration node without current_iter. Skipping")
+			logging.Logger.Error("AST Traversal: Iteration node without current_iter. Skipping")
 			return
 		}
 
 		expr := node.ChildByFieldName("expression")
 		if expr == nil {
-			//logging.Logger.Error("AST Traversal: Iteration node without expression. Skipping")
+			logging.Logger.Error("AST Traversal: Iteration node without expression. Skipping")
 			return
 		}
 
@@ -711,17 +735,17 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			expr)
 
 		scope.addSymbol(&iterSym)
-		//logging.Logger.Info("Parsed iteration", "current_iter", currentIterIdent.Ident, "scope", iterScope)
-		//logging.Logger.Info("Current scope values", "scope", scope)
+		logging.Logger.Info("Parsed iteration", "current_iter", currentIterIdent.Ident, "scope", iterScope)
+		logging.Logger.Info("Current scope values", "scope", scope)
 	case "pattern":
-		//logging.Logger.Info("AST Traversal: Got pattern node")
+		logging.Logger.Info("AST Traversal: Got pattern node")
 
 		caseRules := []Symbol{}
 
 		rules := node.NamedChild(0)
 
 		if rules == nil {
-			//logging.Logger.Error("AST Traversal: Pattern node without rules. Skipping")
+			logging.Logger.Error("AST Traversal: Pattern node without rules. Skipping")
 			return
 		}
 
@@ -729,25 +753,25 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			ruleNode := rules.NamedChild(i)
 
 			if ruleNode == nil {
-				//logging.Logger.Error("AST Traversal: Pattern node with nil child. Skipping")
+				logging.Logger.Error("AST Traversal: Pattern node with nil child. Skipping")
 				continue
 			}
 
 			if ruleNode.GrammarName() != "rule" {
-				//logging.Logger.Error("AST Traversal: Pattern node with non-rule child. Skipping", "child", ruleNode.GrammarName())
+				logging.Logger.Error("AST Traversal: Pattern node with non-rule child. Skipping", "child", ruleNode.GrammarName())
 				continue
 			}
 
 			arguments := ruleNode.NamedChild(0) // arguments are the first child of a rule node
 			if arguments == nil {
-				//logging.Logger.Error("AST Traversal: Rule without arguments. Skipping")
+				logging.Logger.Error("AST Traversal: Rule without arguments. Skipping")
 				continue
 			}
-			//logging.Logger.Info("AST Traversal: Parsing rule", "rule", arguments.ToSexp())
+			logging.Logger.Info("AST Traversal: Parsing rule", "rule", arguments.ToSexp())
 
 			expression := ruleNode.ChildByFieldName("expression")
 			if expression == nil {
-				//logging.Logger.Error("AST Traversal: Rule without expression. Skipping")
+				logging.Logger.Error("AST Traversal: Rule without expression. Skipping")
 				continue
 			}
 
@@ -769,7 +793,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			}, ruleScope, expression)
 
 			caseRules = append(caseRules, ruleSym)
-			//logging.Logger.Info("AST Traversal: Parsed rule", "rule", ruleSym.Ident, "scope", ruleSym.Scope)
+			logging.Logger.Info("AST Traversal: Parsed rule", "rule", ruleSym.Ident, "scope", ruleSym.Scope)
 		}
 
 		caseSymbol := NewCase(
@@ -780,8 +804,8 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			caseRules)
 		scope.addSymbol(&caseSymbol)
 
-		//logging.Logger.Info("AST Traversal: Parsed pattern", "case_rules", len(caseSymbol.Children))
-		//logging.Logger.Info("Current scope values", "scope", scope)
+		logging.Logger.Info("AST Traversal: Parsed pattern", "case_rules", len(caseSymbol.Children))
+		logging.Logger.Info("Current scope values", "scope", scope)
 	default:
 		for i := uint(0); i < node.ChildCount(); i++ {
 			workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited, fileChan)
@@ -889,22 +913,23 @@ func FindDefinitionHelper(ident string, scope *Scope, store *Store, visited *map
 
 }
 
-func FindEnvironmentIdent(ident string, scope *Scope, store *Store) (util.Path, error) {
+func FindEnvironmentIdent(ident string, scope *Scope, store *Store) (Symbol, error) {
 	var visited = make(map[util.Path]struct{})
 
 	return FindEnvironmentHelper(ident, scope, store, &visited)
 }
 
-func FindEnvironmentHelper(ident string, scope *Scope, store *Store, visited *map[util.Path]struct{}) (util.Path, error) {
+func FindEnvironmentHelper(ident string, scope *Scope, store *Store, visited *map[util.Path]struct{}) (Symbol, error) {
 	if scope == nil {
-		return "", fmt.Errorf("Invalid scope")
+		return Symbol{}, fmt.Errorf("Invalid scope")
 	}
 
 	// 1) Check current scope's definitions for this symbol
 	for _, symbol := range scope.Symbols {
-
+		logging.Logger.Info("Comparing with current symbol", "symbol", symbol.Ident, "expected", ident)
 		if symbol.Ident == ident {
-			return symbol.File, nil
+			logging.Logger.Info("Found symbol, now looking deeper to find environment", "sym", ident)
+			return FindFirstEnvironment(symbol)
 		}
 	}
 
@@ -912,6 +937,7 @@ func FindEnvironmentHelper(ident string, scope *Scope, store *Store, visited *ma
 	// TODO: Instead of 2 loops, get import symbols in the first loop itself and iterate through that
 	logging.Logger.Info("Symbol not in scope, checking import statements")
 	for i, symbol := range scope.Symbols {
+
 		if symbol.Kind == Import {
 			logging.Logger.Info("Symbol type", "type", symbol.Kind.String(), "index", i)
 			f, ok := store.Files.GetFromPath(symbol.File)
@@ -928,6 +954,73 @@ func FindEnvironmentHelper(ident string, scope *Scope, store *Store, visited *ma
 	if scope.Parent != nil {
 		logging.Logger.Info("Going to parent to find", "ident", ident)
 		return FindEnvironmentHelper(ident, scope.Parent, store, visited)
+	} else {
+		return Symbol{}, fmt.Errorf("Couldn't find symbol")
+	}
+
+}
+
+func FindFirstEnvironment(sym *Symbol) (Symbol, error) {
+	switch sym.Kind {
+	case Environment:
+		logging.Logger.Info("Already environment symbol, returning", "env", sym.Loc.Range)
+		return *sym, nil
+	case WithEnvironment, LetRecEnvironment:
+		logging.Logger.Info("With Environment, looking in it's children")
+		for _, sym := range sym.Expression.Symbols {
+			return FindFirstEnvironment(sym)
+		}
+	case Function, Definition:
+		logging.Logger.Info("Definition, looking in it's children")
+		for _, sym := range sym.Expression.Symbols {
+			return FindFirstEnvironment(sym)
+		}
+	default:
+		logging.Logger.Info("Got unwanted symbol, ignoring", "kind", sym.Kind.String(), "loc", sym.Loc)
+	}
+	return Symbol{}, fmt.Errorf("Couldn't find environment with the desired identifier")
+
+}
+
+func FindLibraryIdent(ident string, scope *Scope, store *Store) (util.Path, error) {
+	var visited = make(map[util.Path]struct{})
+
+	return FindLibraryHelper(ident, scope, store, &visited)
+}
+
+func FindLibraryHelper(ident string, scope *Scope, store *Store, visited *map[util.Path]struct{}) (util.Path, error) {
+	if scope == nil {
+		return "", fmt.Errorf("Invalid scope")
+	}
+
+	// 1) Check current scope's definitions for this symbol
+	for _, symbol := range scope.Symbols {
+		logging.Logger.Info("Comparing with current symbol", "symbol", symbol.Ident, "expected", ident)
+		if symbol.Ident == ident {
+			return symbol.File, nil
+		}
+	}
+
+	// 2) Check imported files for this symbol
+	// TODO: Instead of 2 loops, get import symbols in the first loop itself and iterate through that
+	logging.Logger.Info("Symbol not in scope, checking import statements")
+	for i, symbol := range scope.Symbols {
+		if symbol.Kind == Import {
+			logging.Logger.Info("Symbol type", "type", symbol.Kind.String(), "index", i)
+			f, ok := store.Files.GetFromPath(symbol.File)
+			if ok {
+				logging.Logger.Info("Found import statement, checking in file", "path", f.Handle.Path)
+				found, err := FindLibraryHelper(ident, f.Scope, store, visited)
+				if err == nil {
+					return found, nil
+				}
+			}
+		}
+	}
+
+	if scope.Parent != nil {
+		logging.Logger.Info("Going to parent to find", "ident", ident)
+		return FindLibraryHelper(ident, scope.Parent, store, visited)
 	} else {
 		return "", fmt.Errorf("Couldn't find symbol")
 	}
@@ -997,7 +1090,7 @@ func FindLowestScopeContainingRange(scope *Scope, identRange transport.Range) *S
 			}
 		}
 	}
-
+	logging.Logger.Info("Returning current scope", "scope", scope.Range)
 	return scope
 }
 
