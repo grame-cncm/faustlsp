@@ -112,7 +112,8 @@ func ParseDocumentation(node *tree_sitter.Node, content []byte) string {
 
 		lineContent := curr.Utf8Text(content)
 		lineContent = lineContent[len("//"):]
-		docs = lineContent + "\n" + docs
+		// Double spaces for markdown
+		docs = lineContent + "  \n" + docs
 	}
 	logging.Logger.Info("Parsed docs", "documentation", docs)
 	return docs
