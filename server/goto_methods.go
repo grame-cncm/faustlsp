@@ -97,6 +97,91 @@ func GetDefinition(ctx context.Context, s *Server, par json.RawMessage) (json.Ra
 	return []byte("null"), nil
 }
 
+func Hover(ctx context.Context, s *Server, par json.RawMessage) (json.RawMessage, error) {
+	// TODO: Work on this function
+	var params transport.HoverParams
+	json.Unmarshal(par, &params)
+
+	logging.Logger.Info("Hover Request", "params", params)
+	path, err := util.URI2path(string(params.TextDocument.URI))
+	if err != nil {
+		logging.Logger.Error("Uri2path error", "error", err)
+		return []byte{}, err
+	}
+
+	f, ok := s.Files.GetFromPath(path)
+	if !ok {
+		logging.Logger.Error("File should've been in server file store", "path", path)
+	}
+
+	offset, err := PositionToOffset(params.Position, string(f.Content), string(s.Files.encoding))
+	if err != nil {
+		return []byte{}, err
+	}
+
+	ident, scope := FindSymbolScope(f.Content, f.Scope, offset)
+
+	logging.Logger.Info("Got symbol at Location", "symbol", ident, "scope_exists", f.Scope != nil)
+
+	if ident == "" {
+		// Couldn't find symbol to lookup
+		return []byte("null"), nil
+	}
+
+	identSplit := strings.Split(ident, ".")
+
+	if len(identSplit) > 1 {
+		logging.Logger.Info("Resolving library symbol", "symbol", identSplit)
+		for i := range len(identSplit) - 1 {
+			libIdent := identSplit[i]
+
+			// Resolve as Environment
+			sym, err := FindEnvironmentIdent(libIdent, scope, &s.Store)
+			logging.Logger.Info("Resolved environment", "env", libIdent, "sym", sym.Ident, "loc", sym.Loc)
+			if err == nil {
+				scope = sym.Scope
+				continue
+			}
+
+			// Resolve as Library if not resolved as environment
+			file, err := FindLibraryIdent(libIdent, scope, &s.Store)
+			if err != nil {
+				break
+			}
+			logging.Logger.Info("Resolved library environment", "env", libIdent, "location", file)
+			f, ok := s.Store.Files.GetFromPath(file)
+			if ok {
+				f.mu.RLock()
+				logging.Logger.Info("Setting New Scope to", "path", file)
+				scope = f.Scope
+				f.mu.RUnlock()
+				if scope == nil {
+					break
+				}
+			}
+		}
+	}
+	ident = identSplit[len(identSplit)-1]
+
+	docs, err := FindDocs(ident, scope, &s.Store)
+
+	logging.Logger.Info("Got docs as", "documentation", docs, "error", err)
+	if err == nil {
+		docsResp := transport.Hover{
+			Contents: transport.MarkupContent{
+				Kind:  transport.Markdown,
+				Value: docs,
+			},
+		}
+		result, err := json.Marshal(docsResp)
+		if err == nil {
+			return result, nil
+		}
+	}
+
+	return []byte("null"), nil
+}
+
 func GetReferences(ctx context.Context, s *Server, par json.RawMessage) (json.RawMessage, error) {
 	// TODO: Work on this function
 	var params transport.DefinitionParams

@@ -89,6 +89,33 @@ type Symbol struct {
 
 	// File path to import scope from
 	File util.Path
+
+	// Documentation
+	Docs string
+}
+
+func ParseDocumentation(node *tree_sitter.Node, content []byte) string {
+	if node == nil {
+		return ""
+	}
+
+	docs := ""
+	curr := node
+	for {
+		curr = curr.PrevSibling()
+		if curr == nil {
+			break
+		}
+		if curr.GrammarName() != "comment" {
+			break
+		}
+
+		lineContent := curr.Utf8Text(content)
+		lineContent = lineContent[len("//"):]
+		docs = lineContent + "\n" + docs
+	}
+	logging.Logger.Info("Parsed docs", "documentation", docs)
+	return docs
 }
 
 func NewIdentifier(Loc Location, Ident string) Symbol {
@@ -99,23 +126,25 @@ func NewIdentifier(Loc Location, Ident string) Symbol {
 	}
 }
 
-func NewDefinition(Loc Location, Ident string, Expr *tree_sitter.Node, Expression *Scope) Symbol {
+func NewDefinition(Loc Location, Ident string, Expr *tree_sitter.Node, Expression *Scope, Docs string) Symbol {
 	return Symbol{
 		Kind:       Definition,
 		Loc:        Loc,
 		Ident:      Ident,
 		Expr:       Expr,
 		Expression: Expression,
+		Docs:       Docs,
 	}
 }
 
-func NewFunction(Loc Location, Ident string, Scope *Scope, Expr *tree_sitter.Node, Expression *Scope) Symbol {
+func NewFunction(Loc Location, Ident string, Scope *Scope, Expr *tree_sitter.Node, Expression *Scope, Docs string) Symbol {
 	return Symbol{
 		Kind:       Function,
 		Loc:        Loc,
 		Ident:      Ident,
 		Scope:      Scope,
 		Expression: Expression,
+		Docs:       Docs,
 	}
 }
 
@@ -504,7 +533,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 					Range: ToRange(node),
 				},
 				identName,
-				value, expr)
+				value, expr, ParseDocumentation(node, currentFile.Content))
 			scope.addSymbol(&sym)
 		}
 	case "environment":
@@ -588,6 +617,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			argumentsScope,
 			expression,
 			exprScope,
+			ParseDocumentation(node, currentFile.Content),
 		)
 
 		scope.addSymbol(&functionNode)
@@ -607,7 +637,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 				Range: ToRange(ident),
 			},
 			ident.Utf8Text(currentFile.Content),
-			expr, nil)
+			expr, nil, ParseDocumentation(ident, currentFile.Content))
 		scope.addSymbol(&sym)
 		logging.Logger.Info("Current scope values", "scope", scope)
 
@@ -909,6 +939,52 @@ func FindDefinitionHelper(ident string, scope *Scope, store *Store, visited *map
 		return FindDefinitionHelper(ident, scope.Parent, store, visited)
 	} else {
 		return Location{}, fmt.Errorf("Couldn't find symbol")
+	}
+
+}
+
+func FindDocs(ident string, scope *Scope, store *Store) (string, error) {
+	var visited = make(map[util.Path]struct{})
+
+	return FindDocsHelper(ident, scope, store, &visited)
+}
+
+func FindDocsHelper(ident string, scope *Scope, store *Store, visited *map[util.Path]struct{}) (string, error) {
+	if scope == nil {
+		return "", fmt.Errorf("Invalid scope")
+	}
+
+	// 1) Check current scope's definitions for this symbol
+	for _, symbol := range scope.Symbols {
+
+		if symbol.Ident == ident {
+			return symbol.Docs, nil
+		}
+	}
+
+	// 2) Check imported files for this symbol
+	// TODO: Instead of 2 loops, get import symbols in the first loop itself and iterate through that
+	logging.Logger.Info("Symbol not in scope, checking import statements")
+	for i, symbol := range scope.Symbols {
+
+		if symbol.Kind == Import {
+			logging.Logger.Info("Symbol type", "type", symbol.Kind.String(), "index", i)
+			f, ok := store.Files.GetFromPath(symbol.File)
+			if ok {
+				logging.Logger.Info("Found import statement, checking in file", "path", f.Handle.Path)
+				found, err := FindDocsHelper(ident, f.Scope, store, visited)
+				if err == nil {
+					return found, nil
+				}
+			}
+		}
+	}
+
+	if scope.Parent != nil {
+		logging.Logger.Info("Going to parent to find", "ident", ident)
+		return FindDocsHelper(ident, scope.Parent, store, visited)
+	} else {
+		return "", fmt.Errorf("Couldn't find symbol")
 	}
 
 }
