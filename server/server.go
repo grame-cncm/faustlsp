@@ -235,6 +235,7 @@ var requestHandlers = map[string]func(context.Context, *Server, json.RawMessage)
 	"textDocument/formatting":     Formatting,
 	"textDocument/definition":     GetDefinition,
 	"textDocument/hover":          Hover,
+	"textDocument/completion":     Completion,
 	"shutdown":                    ShutdownEnd,
 }
 

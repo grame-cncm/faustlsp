@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/carn181/faustlsp/logging"
 	"github.com/carn181/faustlsp/parser"
@@ -1040,22 +1042,22 @@ func FindEnvironmentHelper(ident string, scope *Scope, store *Store, visited *ma
 func FindFirstEnvironment(sym *Symbol) (Symbol, error) {
 	switch sym.Kind {
 	case Environment:
-		logging.Logger.Info("Already environment symbol, returning", "env", sym.Loc.Range)
+		//		logging.Logger.Info("Already environment symbol, returning", "env", sym.Loc.Range)
 		return *sym, nil
 	case WithEnvironment, LetRecEnvironment:
-		logging.Logger.Info("With Environment, looking in it's children")
+		//		logging.Logger.Info("With Environment, looking in it's children")
 		for _, sym := range sym.Expression.Symbols {
 			return FindFirstEnvironment(sym)
 		}
 	case Function, Definition:
-		logging.Logger.Info("Definition, looking in it's children")
+		//		logging.Logger.Info("Definition, looking in it's children")
 		for _, sym := range sym.Expression.Symbols {
 			return FindFirstEnvironment(sym)
 		}
 	default:
-		logging.Logger.Info("Got unwanted symbol, ignoring", "kind", sym.Kind.String(), "loc", sym.Loc)
+		//		logging.Logger.Info("Got unwanted symbol, ignoring", "kind", sym.Kind.String(), "loc", sym.Loc)
 	}
-	return Symbol{}, fmt.Errorf("Couldn't find environment with the desired identifier")
+	return Symbol{}, fmt.Errorf("Couldn't find environment in symbol")
 
 }
 
@@ -1104,6 +1106,279 @@ func FindLibraryHelper(ident string, scope *Scope, store *Store, visited *map[ut
 
 }
 
+func GetPossibleSymbols(pos transport.Position, filePath util.Path, store *Store, encoding string) []string {
+	f, ok := store.Files.GetFromPath(filePath)
+	if !ok {
+		logging.Logger.Info("Couldn't find file", "path", filePath)
+		return []string{}
+	}
+
+	// 1) Get scope at position
+	offset, err := PositionToOffset(pos, string(f.Content), encoding)
+	if err != nil {
+		logging.Logger.Info("Couldn't convert position to offset", "pos", pos, "err", err)
+		return []string{}
+	}
+
+	// TOOD: Use identifier to filter results
+	identifier, scope := FindSymbolScopeAtOffset(f.Content, f.Scope, offset, string(store.Files.encoding))
+	_ = identifier
+	if scope == nil {
+		logging.Logger.Info("Couldn't find scope at position", "pos", pos, "offset", offset)
+		return []string{}
+	}
+
+	// 2) Go up in scope and add to list
+	var availableSymbols = []string{}
+
+	visited := make(map[util.Path]FileSymbols)
+	for {
+		logging.Logger.Info("Looking in scope", "scope_range", scope.Range, "len", len(scope.Symbols))
+		scope = scope.Parent
+		if scope == nil {
+			logging.Logger.Info("No more parent scopes")
+			break
+		}
+		availableSymbols = slices.Concat(availableSymbols, FindSymbols(scope, "", store, visited))
+	}
+	logging.Logger.Info("Available symbols", "symbols", availableSymbols)
+	logging.Logger.Info("Adding symbols from other files", "files", len(visited))
+	for _, fileSyms := range visited {
+		smallestEnvIdent := findMinString(fileSyms.envIdents)
+		logging.Logger.Info("Adding symbols from file", "possible_env_idents", fileSyms.envIdents, "smallest_env_ident", smallestEnvIdent, "symbols", fileSyms.symbols)
+		availableSymbols = slices.Concat(availableSymbols, AddEnvIdents(fileSyms.symbols, smallestEnvIdent))
+	}
+	return availableSymbols
+}
+
+func findMinString(strs []string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+	minStr := strs[0]
+	for _, str := range strs {
+		if len(str) < len(minStr) {
+			minStr = str
+		}
+	}
+	return minStr
+}
+
+func JoinEnvIdent(parentSymbol, childSymbol string) string {
+	if parentSymbol == "" {
+		return childSymbol
+	}
+	return parentSymbol + "." + childSymbol
+}
+
+func AddEnvIdents(symbols []string, parentSymbol string) []string {
+	for i, symbol := range symbols {
+		symbols[i] = JoinEnvIdent(parentSymbol, symbol)
+	}
+
+	return symbols
+}
+
+func FindSymbols(scope *Scope, parentSymbol string, store *Store, visited map[util.Path]FileSymbols) []string {
+	symbols := []string{}
+
+	for _, sym := range scope.Symbols {
+		//		logging.Logger.Info("Found symbol in scope", "symbol", sym.Ident, "kind", sym.Kind.String(), "loc", sym.Loc)
+		if sym.Ident != "" {
+			symbols = append(symbols, sym.Ident)
+		}
+		if sym.Kind == Environment {
+			childSyms := FindSymbols(sym.Scope, JoinEnvIdent(parentSymbol, sym.Ident), store, visited)
+			childSyms = AddEnvIdents(childSyms, JoinEnvIdent(parentSymbol, sym.Ident))
+			symbols = slices.Concat(symbols, childSyms)
+		}
+		if sym.Kind == Definition || sym.Kind == Function {
+			env, err := FindFirstEnvironment(sym)
+			if err != nil {
+				continue
+			}
+			childSyms := FindSymbols(env.Scope, JoinEnvIdent(parentSymbol, sym.Ident), store, visited)
+			childSyms = AddEnvIdents(childSyms, JoinEnvIdent(parentSymbol, sym.Ident))
+			symbols = slices.Concat(symbols, childSyms)
+
+		}
+		if sym.Kind == WithEnvironment || sym.Kind == LetRecEnvironment {
+			// Find lowest environment
+			env, err := FindFirstEnvironment(sym)
+			if err != nil {
+				continue
+			}
+
+			childSyms := FindSymbols(env.Scope, JoinEnvIdent(parentSymbol, sym.Ident), store, visited)
+			childSyms = AddEnvIdents(childSyms, JoinEnvIdent(parentSymbol, sym.Ident))
+			symbols = slices.Concat(symbols, childSyms)
+		}
+		if sym.Kind == Library {
+			FindSymbolsInFile(sym, JoinEnvIdent(parentSymbol, sym.Ident), store, visited)
+		}
+		if sym.Kind == Import {
+			FindSymbolsInFile(sym, parentSymbol, store, visited)
+		}
+	}
+
+	return symbols
+}
+
+type FileSymbols struct {
+	envIdents []string
+	symbols   []string
+}
+
+func FindSymbolsInFile(sym *Symbol, parentSymbol string, store *Store, visited map[util.Path]FileSymbols) {
+	// Used for adding symbols from other files when an import or library statement is encountered
+	symbols := []string{}
+
+	libPath := sym.File
+	fileSyms, ok := visited[libPath]
+	if !ok {
+		logging.Logger.Info("Visiting library for the first time", "lib", libPath, "parentSymbol", parentSymbol)
+		visited[libPath] = FileSymbols{
+			envIdents: []string{parentSymbol},
+		}
+
+		f, ok := store.Files.GetFromPath(libPath)
+		if ok {
+			f.mu.RLock()
+			childSyms := FindSymbols(f.Scope, parentSymbol, store, visited)
+
+			symbols = slices.Concat(symbols, childSyms)
+			f.mu.RUnlock()
+		}
+		fileSyms = visited[libPath]
+		fileSyms.symbols = slices.Concat(symbols)
+		visited[libPath] = fileSyms
+	} else {
+		logging.Logger.Info("Library already visited, adding envIdent to possible environment identifiers for the file's symbols", "lib", libPath, "possible_env_idents", fileSyms.envIdents, "parentSymbol", parentSymbol)
+		fileSyms.envIdents = append(fileSyms.envIdents, parentSymbol)
+		visited[libPath] = fileSyms
+	}
+}
+func FindTopLevelSymbols(scope *Scope, store *Store, visited map[string]struct{}) []string {
+	symbols := []string{}
+	for _, sym := range scope.Symbols {
+		if sym.Ident != "" {
+			symbols = append(symbols, sym.Ident)
+			if sym.Kind == Environment {
+				childSyms := FindEnvSymbols(sym, sym.Ident, store, visited)
+				symbols = slices.Concat(symbols, childSyms)
+			}
+			if sym.Kind == Definition || sym.Kind == Function {
+				env, err := FindFirstEnvironment(sym)
+				if err != nil {
+					continue
+				}
+				childSyms := FindEnvSymbols(&env, sym.Ident, store, visited)
+				symbols = slices.Concat(symbols, childSyms)
+
+			}
+			if sym.Kind == WithEnvironment || sym.Kind == LetRecEnvironment {
+				// Find lowest environment
+				env, err := FindFirstEnvironment(sym)
+				if err != nil {
+					continue
+				}
+
+				childSyms := FindEnvSymbols(&env, sym.Ident, store, visited)
+				symbols = slices.Concat(symbols, childSyms)
+			}
+			if sym.Kind == Library {
+				libPath := sym.File
+				if _, ok := visited[libPath]; !ok {
+					visited[libPath] = struct{}{}
+					f, ok := store.Files.GetFromPath(libPath)
+					if ok {
+						f.mu.RLock()
+						childSyms := FindTopLevelSymbols(f.Scope, store, visited)
+						for i, symbol := range childSyms {
+							childSyms[i] = sym.Ident + "." + symbol
+						}
+						symbols = slices.Concat(symbols, childSyms)
+						f.mu.RUnlock()
+					}
+
+				}
+			}
+		} else if sym.Kind == Import {
+			libPath := sym.File
+			if _, ok := visited[libPath]; !ok {
+				visited[libPath] = struct{}{}
+				f, ok := store.Files.GetFromPath(libPath)
+				if ok {
+					f.mu.RLock()
+					childSyms := FindTopLevelSymbols(f.Scope, store, visited)
+					symbols = slices.Concat(symbols, childSyms)
+					f.mu.RUnlock()
+				}
+			}
+		}
+	}
+	return symbols
+}
+
+func FindEnvSymbols(env *Symbol, envIdent string, store *Store, visited map[string]struct{}) []string {
+	// Assumes env is environment symbol
+	symbols := []string{}
+
+	if envIdent == "" {
+		envIdent = env.Ident
+	}
+
+	for _, sym := range env.Scope.Symbols {
+		if sym.Ident != "" {
+			symbols = append(symbols, envIdent+"."+sym.Ident)
+		}
+		if sym.Kind == Environment {
+			childSyms := FindEnvSymbols(sym, sym.Ident, store, visited)
+			symbols = slices.Concat(symbols, childSyms)
+		}
+		if sym.Kind == Definition || sym.Kind == Function {
+			env, err := FindFirstEnvironment(sym)
+			if err != nil {
+				continue
+			}
+			childSyms := FindEnvSymbols(&env, envIdent+"."+sym.Ident, store, visited)
+			symbols = slices.Concat(symbols, childSyms)
+
+		}
+		if sym.Kind == WithEnvironment || sym.Kind == LetRecEnvironment {
+			// Find lowest environment
+			env, err := FindFirstEnvironment(sym)
+			if err != nil {
+				continue
+			}
+
+			childSyms := FindEnvSymbols(&env, sym.Ident, store, visited)
+			symbols = slices.Concat(symbols, childSyms)
+		}
+		if sym.Kind == Library {
+			libPath := sym.File
+			if _, ok := visited[libPath]; !ok {
+				visited[libPath] = struct{}{}
+				f, ok := store.Files.GetFromPath(libPath)
+				if ok {
+					f.mu.RLock()
+					childSyms := FindTopLevelSymbols(f.Scope, store, visited)
+					for i, symbol := range childSyms {
+						childSyms[i] = envIdent + "." + sym.Ident + "." + symbol
+
+					}
+					symbols = slices.Concat(symbols, childSyms)
+					f.mu.RUnlock()
+
+				}
+
+			}
+		}
+	}
+
+	return symbols
+}
+
 func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope) {
 	// TODO: Implement this manually following valid characters for identifier instead of using tree_sitter as it is computationally expensive
 	tree := parser.ParseTree(content)
@@ -1150,24 +1425,55 @@ func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope)
 	return "", nil
 }
 
+func FindSymbolScopeAtOffset(content []byte, scope *Scope, offset uint, encoding string) (string, *Scope) {
+	i, j := offset, offset
+	for {
+		if i == 0 || j == uint(len(content)-1) {
+			break
+		}
+		if unicode.IsLetter(rune(content[i])) || unicode.IsDigit(rune(content[i])) || content[i] == '.' {
+			i--
+
+		}
+		if unicode.IsLetter(rune(content[j])) || unicode.IsDigit(rune(content[j])) || content[j] == '.' {
+			j++
+		} else {
+			break
+		}
+	}
+	ident := content[i:j]
+	logging.Logger.Info("Found identifier at offset", "ident", string(ident), "start", i+1, "end", j, "offset", offset)
+	start, err := OffsetToPosition(i, string(content), encoding)
+	end, err := OffsetToPosition(j, string(content), encoding)
+	if err != nil {
+		return "", nil
+	}
+	identRange := transport.Range{
+		Start: start,
+		End:   end,
+	}
+	lowestScope := FindLowestScopeContainingRange(scope, identRange)
+	return string(ident), lowestScope
+}
+
 func FindLowestScopeContainingRange(scope *Scope, identRange transport.Range) *Scope {
 	if scope != nil {
-		logging.Logger.Info("Scope children", "length", len(scope.Children))
-		for i, childScope := range scope.Children {
-			logging.Logger.Info("Current child scope", "no", i)
-			logging.Logger.Info("Looking in child scope to find lowest scope", "current", scope.Range, "child", childScope.Range, "target", identRange)
-			logging.Logger.Info("What is parent scope ?", "scope", scope.Symbols[0])
+		//		logging.Logger.Info("Scope children", "length", len(scope.Children))
+		for _, childScope := range scope.Children {
+			//			logging.Logger.Info("Current child scope", "no", i)
+			//			logging.Logger.Info("Looking in child scope to find lowest scope", "current", scope.Range, "child", childScope.Range, "target", identRange)
+			//			logging.Logger.Info("What is parent scope ?", "scope", scope.Symbols[0])
 			if childScope != nil {
 				if RangeContains(childScope.Range, identRange) {
-					logging.Logger.Info("Scope contains identifier", "scope", childScope.Range, "ident", identRange)
+					//					logging.Logger.Info("Scope contains identifier", "scope", childScope.Range, "ident", identRange)
 					return FindLowestScopeContainingRange(childScope, identRange)
 				} else {
-					logging.Logger.Info("Parent scope does not contain child scope", "parent", scope.Range, "child", childScope.Range)
+					//					logging.Logger.Info("Parent scope does not contain child scope", "parent", scope.Range, "child", childScope.Range)
 				}
 			}
 		}
 	}
-	logging.Logger.Info("Returning current scope", "scope", scope.Range)
+	//	logging.Logger.Info("Returning current scope", "scope", scope.Range)
 	return scope
 }
 
