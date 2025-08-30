@@ -140,15 +140,6 @@ func ParseDocumentation(node *tree_sitter.Node, content []byte) Documentation {
 	return doc
 }
 
-func containsLetters(str string) bool {
-	for _, c := range str {
-		if !unicode.IsLetter(c) {
-			return false
-		}
-	}
-	return true
-}
-
 func NewIdentifier(Loc Location, Ident string) Symbol {
 	return Symbol{
 		Kind:  Identifier,
@@ -1181,17 +1172,17 @@ func GetPossibleSymbols(pos transport.Position, filePath util.Path, store *Store
 		// Remove trailing '.' if any
 		// Example: a.f. -> a.f
 		// This is because completion is requested after '.'
-		logging.Logger.Info("Removing trailing '.' from identifier", "ident", identifier)
+		//		logging.Logger.Info("Removing trailing '.' from identifier", "ident", identifier)
 		identifier = identifier[:len(identifier)-1]
 		sym, err := FindSymbolDefinition(identifier, scope, store)
 		if err != nil {
-			logging.Logger.Info("Couldn't find symbol definition for identifier, checking with previous identifier", "ident", identifier, "err", err)
+			//			logging.Logger.Info("Couldn't find symbol definition for identifier, checking with previous identifier", "ident", identifier, "err", err)
 			identifierSplit := strings.Split(identifier, ".")
 			if len(identifierSplit) > 2 {
 				identifier = strings.Join(identifierSplit[:len(identifierSplit)-1], ".")
 				sym, err = FindSymbolDefinition(identifier, scope, store)
 				if err != nil {
-					logging.Logger.Info("Couldn't find symbol definition for identifier", "ident", identifier, "err", err)
+					//					logging.Logger.Info("Couldn't find symbol definition for identifier", "ident", identifier, "err", err)
 					return []CompletionSym{}
 				}
 			} else {
@@ -1220,7 +1211,7 @@ func GetPossibleSymbols(pos transport.Position, filePath util.Path, store *Store
 			return []CompletionSym{}
 		}
 	} else {
-		logging.Logger.Info("Identifier doesn't end with '.', returning all symbols in current scope", "ident", identifier)
+		//		logging.Logger.Info("Identifier doesn't end with '.', returning all symbols in current scope", "ident", identifier)
 		availableSymbols := []CompletionSym{}
 		for {
 			if scope == nil {
@@ -1258,7 +1249,7 @@ func FindSymbolsNew(scope *Scope, parentSymbol string, store *Store, visited map
 	symbols := []CompletionSym{}
 
 	for _, sym := range scope.Symbols {
-		logging.Logger.Info("Found symbol in scope", "symbol", sym.Ident, "kind", sym.Kind.String(), "loc", sym.Loc)
+		//		logging.Logger.Info("Found symbol in scope", "symbol", sym.Ident, "kind", sym.Kind.String(), "loc", sym.Loc)
 		if sym.Ident != "" {
 			symbols = append(symbols, NewCompletionSym(sym))
 		}
@@ -1298,7 +1289,7 @@ func FindSymbolsInFile(sym *Symbol, parentSymbol string, store *Store, visited m
 	libPath := sym.File
 	_, ok := visited[libPath]
 	if !ok {
-		logging.Logger.Info("Visiting file for the first time", "lib", libPath, "parentSymbol", parentSymbol)
+		//	logging.Logger.Info("Visiting file for the first time", "lib", libPath, "parentSymbol", parentSymbol)
 		visited[libPath] = struct{}{}
 
 		f, ok := store.Files.GetFromPath(libPath)
@@ -1309,7 +1300,7 @@ func FindSymbolsInFile(sym *Symbol, parentSymbol string, store *Store, visited m
 		}
 
 	} else {
-		logging.Logger.Info("File already visited", "path", libPath)
+		//		logging.Logger.Info("File already visited", "path", libPath)
 
 	}
 
@@ -1364,15 +1355,26 @@ func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope)
 func FindSymbolScopeAtOffset(content []byte, scope *Scope, offset uint, encoding string) (string, *Scope) {
 	// Manual version of FindSymbolScope that doesn't use tree-sitter to find the identifier at the given offset
 	i, j := offset, offset
+
+	// Move start till reaches non valid character
 	for {
-		if i == 0 || j == uint(len(content)-1) {
+		if j == uint(len(content)-1) {
+			break
+		}
+		if unicode.IsLetter(rune(content[j])) || unicode.IsDigit(rune(content[j])) || content[j] == '.' {
+			j++
+		} else {
+			break
+		}
+	}
+
+	// Move end till reaches non valid character
+	for {
+		if i == 0 {
 			break
 		}
 		if unicode.IsLetter(rune(content[i])) || unicode.IsDigit(rune(content[i])) || content[i] == '.' {
 			i--
-		}
-		if unicode.IsLetter(rune(content[j])) || unicode.IsDigit(rune(content[j])) || content[j] == '.' {
-			j++
 		} else {
 			break
 		}
@@ -1394,7 +1396,7 @@ func FindSymbolScopeAtOffset(content []byte, scope *Scope, offset uint, encoding
 		ident = content[i+1 : j]
 	}
 
-	logging.Logger.Info("Found identifier at offset", "ident", string(ident), "start", i+1, "end", j, "offset", offset)
+	//logging.Logger.Info("Found identifier at offset", "ident", string(ident), "start", i+1, "end", j, "offset", offset)
 	start, err := OffsetToPosition(i, string(content), encoding)
 	end, err := OffsetToPosition(j, string(content), encoding)
 	if err != nil {

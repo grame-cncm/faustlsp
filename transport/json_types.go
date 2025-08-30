@@ -1018,7 +1018,7 @@ type CompletionItem struct {
 	// contained and starting at the same position.
 	//
 	// @since 3.16.0 additional type `InsertReplaceEdit`
-	TextEdit *Or_CompletionItem_textEdit `json:"textEdit,omitempty"`
+	TextEdit TextEdit `json:"textEdit,omitempty"`
 	// The edit text used if the completion item is part of a CompletionList and
 	// CompletionList defines an item default for the text edit range.
 	//

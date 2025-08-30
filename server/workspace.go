@@ -101,13 +101,16 @@ func (workspace *Workspace) Init(ctx context.Context, s *Server) {
 
 				workspace.addFile(path)
 
-				f, _ = s.Files.GetFromPath(path)
-
-				workspace.DiagnoseFile(path, s)
+				f, ok = s.Files.GetFromPath(path)
+				if ok {
+					workspace.DiagnoseFile(path, s)
+				}
 			}
 			// Test if goroutine speeds this up
-			if IsFaustFile(f.Handle.Path) {
-				go workspace.AnalyzeFile(f, &s.Store)
+			if ok {
+				if IsFaustFile(f.Handle.Path) {
+					go workspace.AnalyzeFile(f, &s.Store)
+				}
 			}
 		}
 		return nil
