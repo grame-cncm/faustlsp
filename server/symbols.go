@@ -93,16 +93,23 @@ type Symbol struct {
 	File util.Path
 
 	// Documentation
-	Docs string
+	Docs Documentation
 }
 
-func ParseDocumentation(node *tree_sitter.Node, content []byte) string {
+type Documentation struct {
+	Full  string
+	Usage string
+}
+
+func ParseDocumentation(node *tree_sitter.Node, content []byte) Documentation {
 	if node == nil {
-		return ""
+		return Documentation{Full: "", Usage: ""}
 	}
 
-	docs := ""
+	docContent := []string{}
 	curr := node
+
+	// Traverse previous siblings until we find a non-comment node
 	for {
 		curr = curr.PrevSibling()
 		if curr == nil {
@@ -115,10 +122,31 @@ func ParseDocumentation(node *tree_sitter.Node, content []byte) string {
 		lineContent := curr.Utf8Text(content)
 		lineContent = lineContent[len("//"):]
 		// Double spaces for markdown
-		docs = lineContent + "  \n" + docs
+		docContent = slices.Insert(docContent, 0, lineContent)
 	}
-	logging.Logger.Info("Parsed docs", "documentation", docs)
-	return docs
+
+	usage := ""
+	if len(docContent) > 1 {
+		usage = docContent[1]
+	} else if len(docContent) == 1 {
+		usage = docContent[0]
+	}
+
+	doc := Documentation{
+		Full:  strings.Join(docContent, "  \n"),
+		Usage: usage,
+	}
+	logging.Logger.Info("Parsed docs", "documentation", doc)
+	return doc
+}
+
+func containsLetters(str string) bool {
+	for _, c := range str {
+		if !unicode.IsLetter(c) {
+			return false
+		}
+	}
+	return true
 }
 
 func NewIdentifier(Loc Location, Ident string) Symbol {
@@ -129,7 +157,7 @@ func NewIdentifier(Loc Location, Ident string) Symbol {
 	}
 }
 
-func NewDefinition(Loc Location, Ident string, Expr *tree_sitter.Node, Expression *Scope, Docs string) Symbol {
+func NewDefinition(Loc Location, Ident string, Expr *tree_sitter.Node, Expression *Scope, Docs Documentation) Symbol {
 	return Symbol{
 		Kind:       Definition,
 		Loc:        Loc,
@@ -140,7 +168,7 @@ func NewDefinition(Loc Location, Ident string, Expr *tree_sitter.Node, Expressio
 	}
 }
 
-func NewFunction(Loc Location, Ident string, Scope *Scope, Expr *tree_sitter.Node, Expression *Scope, Docs string) Symbol {
+func NewFunction(Loc Location, Ident string, Scope *Scope, Expr *tree_sitter.Node, Expression *Scope, Docs Documentation) Symbol {
 	return Symbol{
 		Kind:       Function,
 		Loc:        Loc,
@@ -900,22 +928,22 @@ func (w *Workspace) ResolveFilePath(relPath util.Path, rootDir util.Path) (path 
 	return "", ""
 }
 
-func FindDefinition(ident string, scope *Scope, store *Store) (Location, error) {
+func FindSymbol(ident string, scope *Scope, store *Store) (Symbol, error) {
 	var visited = make(map[util.Path]struct{})
 
-	return FindDefinitionHelper(ident, scope, store, &visited)
+	return FindSymbolHelper(ident, scope, store, &visited)
 }
 
-func FindDefinitionHelper(ident string, scope *Scope, store *Store, visited *map[util.Path]struct{}) (Location, error) {
+func FindSymbolHelper(ident string, scope *Scope, store *Store, visited *map[util.Path]struct{}) (Symbol, error) {
 	if scope == nil {
-		return Location{}, fmt.Errorf("Invalid scope")
+		return Symbol{}, fmt.Errorf("Invalid scope")
 	}
 
 	// 1) Check current scope's definitions for this symbol
 	for _, symbol := range scope.Symbols {
 
 		if symbol.Ident == ident {
-			return symbol.Loc, nil
+			return *symbol, nil
 		}
 	}
 
@@ -929,7 +957,7 @@ func FindDefinitionHelper(ident string, scope *Scope, store *Store, visited *map
 			f, ok := store.Files.GetFromPath(symbol.File)
 			if ok {
 				logging.Logger.Info("Found import statement, checking in file", "path", f.Handle.Path)
-				found, err := FindDefinitionHelper(ident, f.Scope, store, visited)
+				found, err := FindSymbolHelper(ident, f.Scope, store, visited)
 				if err == nil {
 					return found, nil
 				}
@@ -939,57 +967,60 @@ func FindDefinitionHelper(ident string, scope *Scope, store *Store, visited *map
 
 	if scope.Parent != nil {
 		logging.Logger.Info("Going to parent to find", "ident", ident)
-		return FindDefinitionHelper(ident, scope.Parent, store, visited)
+		return FindSymbolHelper(ident, scope.Parent, store, visited)
 	} else {
-		return Location{}, fmt.Errorf("Couldn't find symbol")
+		return Symbol{}, fmt.Errorf("Couldn't find symbol")
 	}
 
+}
+
+func FindSymbolDefinition(ident string, scope *Scope, store *Store) (Symbol, error) {
+	identSplit := strings.Split(ident, ".")
+
+	if len(identSplit) > 1 {
+		logging.Logger.Info("Resolving library symbol", "symbol", identSplit)
+		for i := range len(identSplit) - 1 {
+			libIdent := identSplit[i]
+
+			// Resolve as Environment
+			sym, err := FindEnvironmentIdent(libIdent, scope, store)
+			logging.Logger.Info("Resolved environment", "env", libIdent, "sym", sym.Ident, "loc", sym.Loc)
+			if err == nil {
+				scope = sym.Scope
+				continue
+			}
+
+			// Resolve as Library if not resolved as environment
+			file, err := FindLibraryIdent(libIdent, scope, store)
+			if err != nil {
+				break
+			}
+			logging.Logger.Info("Resolved library environment", "env", libIdent, "location", file)
+			f, ok := store.Files.GetFromPath(file)
+			if ok {
+				f.mu.RLock()
+				logging.Logger.Info("Setting New Scope to", "path", file)
+				scope = f.Scope
+				f.mu.RUnlock()
+				if scope == nil {
+					break
+				}
+			}
+		}
+	}
+	ident = identSplit[len(identSplit)-1]
+
+	return FindSymbol(ident, scope, store)
+}
+
+func FindDefinition(ident string, scope *Scope, store *Store) (Location, error) {
+	sym, err := FindSymbol(ident, scope, store)
+	return sym.Loc, err
 }
 
 func FindDocs(ident string, scope *Scope, store *Store) (string, error) {
-	var visited = make(map[util.Path]struct{})
-
-	return FindDocsHelper(ident, scope, store, &visited)
-}
-
-func FindDocsHelper(ident string, scope *Scope, store *Store, visited *map[util.Path]struct{}) (string, error) {
-	if scope == nil {
-		return "", fmt.Errorf("Invalid scope")
-	}
-
-	// 1) Check current scope's definitions for this symbol
-	for _, symbol := range scope.Symbols {
-
-		if symbol.Ident == ident {
-			return symbol.Docs, nil
-		}
-	}
-
-	// 2) Check imported files for this symbol
-	// TODO: Instead of 2 loops, get import symbols in the first loop itself and iterate through that
-	logging.Logger.Info("Symbol not in scope, checking import statements")
-	for i, symbol := range scope.Symbols {
-
-		if symbol.Kind == Import {
-			logging.Logger.Info("Symbol type", "type", symbol.Kind.String(), "index", i)
-			f, ok := store.Files.GetFromPath(symbol.File)
-			if ok {
-				logging.Logger.Info("Found import statement, checking in file", "path", f.Handle.Path)
-				found, err := FindDocsHelper(ident, f.Scope, store, visited)
-				if err == nil {
-					return found, nil
-				}
-			}
-		}
-	}
-
-	if scope.Parent != nil {
-		logging.Logger.Info("Going to parent to find", "ident", ident)
-		return FindDocsHelper(ident, scope.Parent, store, visited)
-	} else {
-		return "", fmt.Errorf("Couldn't find symbol")
-	}
-
+	sym, err := FindSymbol(ident, scope, store)
+	return sym.Docs.Full, err
 }
 
 func FindEnvironmentIdent(ident string, scope *Scope, store *Store) (Symbol, error) {
@@ -1106,62 +1137,100 @@ func FindLibraryHelper(ident string, scope *Scope, store *Store, visited *map[ut
 
 }
 
-func GetPossibleSymbols(pos transport.Position, filePath util.Path, store *Store, encoding string) []string {
+type CompletionSym struct {
+	name string
+	docs Documentation
+}
+
+func GetPossibleSymbols(pos transport.Position, filePath util.Path, store *Store, encoding string) []CompletionSym {
 	f, ok := store.Files.GetFromPath(filePath)
 	if !ok {
 		logging.Logger.Info("Couldn't find file", "path", filePath)
-		return []string{}
+		return []CompletionSym{}
 	}
 
 	// 1) Get scope at position
 	offset, err := PositionToOffset(pos, string(f.Content), encoding)
 	if err != nil {
 		logging.Logger.Info("Couldn't convert position to offset", "pos", pos, "err", err)
-		return []string{}
+		return []CompletionSym{}
 	}
 
-	// TOOD: Use identifier to filter results
 	identifier, scope := FindSymbolScopeAtOffset(f.Content, f.Scope, offset, string(store.Files.encoding))
-	_ = identifier
 	if scope == nil {
 		logging.Logger.Info("Couldn't find scope at position", "pos", pos, "offset", offset)
-		return []string{}
+		return []CompletionSym{}
 	}
+	logging.Logger.Info("Found identifier at position", "ident", identifier, "scope_range", scope.Range, "len", len(scope.Symbols))
 
-	// 2) Go up in scope and add to list
-	var availableSymbols = []string{}
+	// 2) Split identifier by '.' to get symbol tree and find scope of last identifier
+	if identifier == "" {
+		logging.Logger.Info("No identifier found at position, returning all symbols possible in current scope", "pos", pos, "offset", offset)
 
-	visited := make(map[util.Path]FileSymbols)
-	for {
-		logging.Logger.Info("Looking in scope", "scope_range", scope.Range, "len", len(scope.Symbols))
-		scope = scope.Parent
-		if scope == nil {
-			logging.Logger.Info("No more parent scopes")
-			break
+		availableSymbols := []CompletionSym{}
+		for {
+			if scope == nil {
+				break
+			}
+			availableSymbols = append(availableSymbols, FindSymbolsNew(scope, "", store, make(map[util.Path]struct{}))...)
+			scope = scope.Parent
 		}
-		availableSymbols = slices.Concat(availableSymbols, FindSymbols(scope, "", store, visited))
+		return availableSymbols
 	}
-	logging.Logger.Info("Available symbols", "symbols", availableSymbols)
-	logging.Logger.Info("Adding symbols from other files", "files", len(visited))
-	for _, fileSyms := range visited {
-		smallestEnvIdent := findMinString(fileSyms.envIdents)
-		logging.Logger.Info("Adding symbols from file", "possible_env_idents", fileSyms.envIdents, "smallest_env_ident", smallestEnvIdent, "symbols", fileSyms.symbols)
-		availableSymbols = slices.Concat(availableSymbols, AddEnvIdents(fileSyms.symbols, smallestEnvIdent))
-	}
-	return availableSymbols
-}
-
-func findMinString(strs []string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	minStr := strs[0]
-	for _, str := range strs {
-		if len(str) < len(minStr) {
-			minStr = str
+	if identifier[len(identifier)-1] == '.' {
+		// Remove trailing '.' if any
+		// Example: a.f. -> a.f
+		// This is because completion is requested after '.'
+		logging.Logger.Info("Removing trailing '.' from identifier", "ident", identifier)
+		identifier = identifier[:len(identifier)-1]
+		sym, err := FindSymbolDefinition(identifier, scope, store)
+		if err != nil {
+			logging.Logger.Info("Couldn't find symbol definition for identifier, checking with previous identifier", "ident", identifier, "err", err)
+			identifierSplit := strings.Split(identifier, ".")
+			if len(identifierSplit) > 2 {
+				identifier = strings.Join(identifierSplit[:len(identifierSplit)-1], ".")
+				sym, err = FindSymbolDefinition(identifier, scope, store)
+				if err != nil {
+					logging.Logger.Info("Couldn't find symbol definition for identifier", "ident", identifier, "err", err)
+					return []CompletionSym{}
+				}
+			} else {
+				return []CompletionSym{}
+			}
 		}
+		logging.Logger.Info("Found symbol definition for identifier", "ident", identifier, "loc", sym.Loc)
+
+		if sym.Kind == Library {
+			logging.Logger.Info("Identifier is a library, getting symbols from file", "file", sym.File)
+			f, ok := store.Files.GetFromPath(sym.File)
+			if ok {
+				f.mu.RLock()
+				syms := FindSymbolsNew(f.Scope, "", store, make(map[util.Path]struct{}))
+				f.mu.RUnlock()
+				return syms
+			} else {
+				logging.Logger.Info("Couldn't find file for library", "file", sym.File)
+				return []CompletionSym{}
+			}
+		} else {
+			env, err := FindEnvironmentIdent(identifier, scope, store)
+			if err == nil {
+				return FindSymbolsNew(env.Scope, "", store, make(map[util.Path]struct{}))
+			}
+			return []CompletionSym{}
+		}
+	} else {
+		logging.Logger.Info("Identifier doesn't end with '.', returning all symbols in current scope", "ident", identifier)
+		availableSymbols := []CompletionSym{}
+		for {
+			if scope == nil {
+				break
+			}
+			availableSymbols = append(availableSymbols, FindSymbolsNew(scope, "", store, make(map[util.Path]struct{}))...)
+			scope = scope.Parent
+		}
+		return availableSymbols
 	}
-	return minStr
 }
 
 func JoinEnvIdent(parentSymbol, childSymbol string) string {
@@ -1171,33 +1240,34 @@ func JoinEnvIdent(parentSymbol, childSymbol string) string {
 	return parentSymbol + "." + childSymbol
 }
 
-func AddEnvIdents(symbols []string, parentSymbol string) []string {
+func AddEnvIdents(symbols []CompletionSym, parentSymbol string) []CompletionSym {
 	for i, symbol := range symbols {
-		symbols[i] = JoinEnvIdent(parentSymbol, symbol)
+		sym := symbols[i]
+		sym.name = JoinEnvIdent(parentSymbol, symbol.name)
+		symbols[i] = sym
 	}
 
 	return symbols
 }
 
-func FindSymbols(scope *Scope, parentSymbol string, store *Store, visited map[util.Path]FileSymbols) []string {
-	symbols := []string{}
+func NewCompletionSym(sym *Symbol) CompletionSym {
+	return CompletionSym{name: sym.Ident, docs: sym.Docs}
+}
+
+func FindSymbolsNew(scope *Scope, parentSymbol string, store *Store, visited map[util.Path]struct{}) []CompletionSym {
+	symbols := []CompletionSym{}
 
 	for _, sym := range scope.Symbols {
-		//		logging.Logger.Info("Found symbol in scope", "symbol", sym.Ident, "kind", sym.Kind.String(), "loc", sym.Loc)
+		logging.Logger.Info("Found symbol in scope", "symbol", sym.Ident, "kind", sym.Kind.String(), "loc", sym.Loc)
 		if sym.Ident != "" {
-			symbols = append(symbols, sym.Ident)
-		}
-		if sym.Kind == Environment {
-			childSyms := FindSymbols(sym.Scope, JoinEnvIdent(parentSymbol, sym.Ident), store, visited)
-			childSyms = AddEnvIdents(childSyms, JoinEnvIdent(parentSymbol, sym.Ident))
-			symbols = slices.Concat(symbols, childSyms)
+			symbols = append(symbols, NewCompletionSym(sym))
 		}
 		if sym.Kind == Definition || sym.Kind == Function {
 			env, err := FindFirstEnvironment(sym)
 			if err != nil {
 				continue
 			}
-			childSyms := FindSymbols(env.Scope, JoinEnvIdent(parentSymbol, sym.Ident), store, visited)
+			childSyms := FindSymbolsNew(env.Scope, JoinEnvIdent(parentSymbol, sym.Ident), store, visited)
 			childSyms = AddEnvIdents(childSyms, JoinEnvIdent(parentSymbol, sym.Ident))
 			symbols = slices.Concat(symbols, childSyms)
 
@@ -1209,178 +1279,44 @@ func FindSymbols(scope *Scope, parentSymbol string, store *Store, visited map[ut
 				continue
 			}
 
-			childSyms := FindSymbols(env.Scope, JoinEnvIdent(parentSymbol, sym.Ident), store, visited)
+			childSyms := FindSymbolsNew(env.Scope, JoinEnvIdent(parentSymbol, sym.Ident), store, visited)
 			childSyms = AddEnvIdents(childSyms, JoinEnvIdent(parentSymbol, sym.Ident))
 			symbols = slices.Concat(symbols, childSyms)
 		}
-		if sym.Kind == Library {
-			FindSymbolsInFile(sym, JoinEnvIdent(parentSymbol, sym.Ident), store, visited)
-		}
 		if sym.Kind == Import {
-			FindSymbolsInFile(sym, parentSymbol, store, visited)
+			symbols = slices.Concat(symbols, FindSymbolsInFile(sym, parentSymbol, store, visited))
 		}
 	}
 
 	return symbols
 }
 
-type FileSymbols struct {
-	envIdents []string
-	symbols   []string
-}
-
-func FindSymbolsInFile(sym *Symbol, parentSymbol string, store *Store, visited map[util.Path]FileSymbols) {
+func FindSymbolsInFile(sym *Symbol, parentSymbol string, store *Store, visited map[util.Path]struct{}) []CompletionSym {
 	// Used for adding symbols from other files when an import or library statement is encountered
-	symbols := []string{}
+	symbols := []CompletionSym{}
 
 	libPath := sym.File
-	fileSyms, ok := visited[libPath]
+	_, ok := visited[libPath]
 	if !ok {
-		logging.Logger.Info("Visiting library for the first time", "lib", libPath, "parentSymbol", parentSymbol)
-		visited[libPath] = FileSymbols{
-			envIdents: []string{parentSymbol},
-		}
+		logging.Logger.Info("Visiting file for the first time", "lib", libPath, "parentSymbol", parentSymbol)
+		visited[libPath] = struct{}{}
 
 		f, ok := store.Files.GetFromPath(libPath)
 		if ok {
 			f.mu.RLock()
-			childSyms := FindSymbols(f.Scope, parentSymbol, store, visited)
-
-			symbols = slices.Concat(symbols, childSyms)
+			symbols = FindSymbolsNew(f.Scope, parentSymbol, store, visited)
 			f.mu.RUnlock()
 		}
-		fileSyms = visited[libPath]
-		fileSyms.symbols = slices.Concat(symbols)
-		visited[libPath] = fileSyms
+
 	} else {
-		logging.Logger.Info("Library already visited, adding envIdent to possible environment identifiers for the file's symbols", "lib", libPath, "possible_env_idents", fileSyms.envIdents, "parentSymbol", parentSymbol)
-		fileSyms.envIdents = append(fileSyms.envIdents, parentSymbol)
-		visited[libPath] = fileSyms
-	}
-}
-func FindTopLevelSymbols(scope *Scope, store *Store, visited map[string]struct{}) []string {
-	symbols := []string{}
-	for _, sym := range scope.Symbols {
-		if sym.Ident != "" {
-			symbols = append(symbols, sym.Ident)
-			if sym.Kind == Environment {
-				childSyms := FindEnvSymbols(sym, sym.Ident, store, visited)
-				symbols = slices.Concat(symbols, childSyms)
-			}
-			if sym.Kind == Definition || sym.Kind == Function {
-				env, err := FindFirstEnvironment(sym)
-				if err != nil {
-					continue
-				}
-				childSyms := FindEnvSymbols(&env, sym.Ident, store, visited)
-				symbols = slices.Concat(symbols, childSyms)
+		logging.Logger.Info("File already visited", "path", libPath)
 
-			}
-			if sym.Kind == WithEnvironment || sym.Kind == LetRecEnvironment {
-				// Find lowest environment
-				env, err := FindFirstEnvironment(sym)
-				if err != nil {
-					continue
-				}
-
-				childSyms := FindEnvSymbols(&env, sym.Ident, store, visited)
-				symbols = slices.Concat(symbols, childSyms)
-			}
-			if sym.Kind == Library {
-				libPath := sym.File
-				if _, ok := visited[libPath]; !ok {
-					visited[libPath] = struct{}{}
-					f, ok := store.Files.GetFromPath(libPath)
-					if ok {
-						f.mu.RLock()
-						childSyms := FindTopLevelSymbols(f.Scope, store, visited)
-						for i, symbol := range childSyms {
-							childSyms[i] = sym.Ident + "." + symbol
-						}
-						symbols = slices.Concat(symbols, childSyms)
-						f.mu.RUnlock()
-					}
-
-				}
-			}
-		} else if sym.Kind == Import {
-			libPath := sym.File
-			if _, ok := visited[libPath]; !ok {
-				visited[libPath] = struct{}{}
-				f, ok := store.Files.GetFromPath(libPath)
-				if ok {
-					f.mu.RLock()
-					childSyms := FindTopLevelSymbols(f.Scope, store, visited)
-					symbols = slices.Concat(symbols, childSyms)
-					f.mu.RUnlock()
-				}
-			}
-		}
-	}
-	return symbols
-}
-
-func FindEnvSymbols(env *Symbol, envIdent string, store *Store, visited map[string]struct{}) []string {
-	// Assumes env is environment symbol
-	symbols := []string{}
-
-	if envIdent == "" {
-		envIdent = env.Ident
-	}
-
-	for _, sym := range env.Scope.Symbols {
-		if sym.Ident != "" {
-			symbols = append(symbols, envIdent+"."+sym.Ident)
-		}
-		if sym.Kind == Environment {
-			childSyms := FindEnvSymbols(sym, sym.Ident, store, visited)
-			symbols = slices.Concat(symbols, childSyms)
-		}
-		if sym.Kind == Definition || sym.Kind == Function {
-			env, err := FindFirstEnvironment(sym)
-			if err != nil {
-				continue
-			}
-			childSyms := FindEnvSymbols(&env, envIdent+"."+sym.Ident, store, visited)
-			symbols = slices.Concat(symbols, childSyms)
-
-		}
-		if sym.Kind == WithEnvironment || sym.Kind == LetRecEnvironment {
-			// Find lowest environment
-			env, err := FindFirstEnvironment(sym)
-			if err != nil {
-				continue
-			}
-
-			childSyms := FindEnvSymbols(&env, sym.Ident, store, visited)
-			symbols = slices.Concat(symbols, childSyms)
-		}
-		if sym.Kind == Library {
-			libPath := sym.File
-			if _, ok := visited[libPath]; !ok {
-				visited[libPath] = struct{}{}
-				f, ok := store.Files.GetFromPath(libPath)
-				if ok {
-					f.mu.RLock()
-					childSyms := FindTopLevelSymbols(f.Scope, store, visited)
-					for i, symbol := range childSyms {
-						childSyms[i] = envIdent + "." + sym.Ident + "." + symbol
-
-					}
-					symbols = slices.Concat(symbols, childSyms)
-					f.mu.RUnlock()
-
-				}
-
-			}
-		}
 	}
 
 	return symbols
 }
 
 func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope) {
-	// TODO: Implement this manually following valid characters for identifier instead of using tree_sitter as it is computationally expensive
 	tree := parser.ParseTree(content)
 	fileAST := tree.RootNode()
 	defer tree.Close()
@@ -1426,6 +1362,7 @@ func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope)
 }
 
 func FindSymbolScopeAtOffset(content []byte, scope *Scope, offset uint, encoding string) (string, *Scope) {
+	// Manual version of FindSymbolScope that doesn't use tree-sitter to find the identifier at the given offset
 	i, j := offset, offset
 	for {
 		if i == 0 || j == uint(len(content)-1) {
@@ -1433,7 +1370,6 @@ func FindSymbolScopeAtOffset(content []byte, scope *Scope, offset uint, encoding
 		}
 		if unicode.IsLetter(rune(content[i])) || unicode.IsDigit(rune(content[i])) || content[i] == '.' {
 			i--
-
 		}
 		if unicode.IsLetter(rune(content[j])) || unicode.IsDigit(rune(content[j])) || content[j] == '.' {
 			j++
@@ -1442,6 +1378,22 @@ func FindSymbolScopeAtOffset(content []byte, scope *Scope, offset uint, encoding
 		}
 	}
 	ident := content[i:j]
+	if string(ident) == "" {
+		// Trying to go back from offset to find identifier
+		i--
+		for {
+			if i <= 0 {
+				break
+			}
+			if unicode.IsLetter(rune(content[i])) || unicode.IsDigit(rune(content[i])) || content[i] == '.' {
+				i--
+			} else {
+				break
+			}
+		}
+		ident = content[i+1 : j]
+	}
+
 	logging.Logger.Info("Found identifier at offset", "ident", string(ident), "start", i+1, "end", j, "offset", offset)
 	start, err := OffsetToPosition(i, string(content), encoding)
 	end, err := OffsetToPosition(j, string(content), encoding)
