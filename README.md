@@ -2,11 +2,11 @@
 
 A LSP Server for the Faust programming language.
 
-# Usage
+# Installation
 
 To install, run  
 ```sh
-    go get github.com/carn181/faustlsp@latest
+go get github.com/carn181/faustlsp@latest
 ```
 
 This will install a `faustlsp` executable in `$HOME/go/bin` by default.  
@@ -21,12 +21,45 @@ go build
 go install
 ```
 
+For code formatting, install [faustfmt](https://github.com/carn181/faustfmt) following install instructions in the project's README.
+
+# Usage
+
+## VS Code
+
+[vscode-faust](https://github.com/carn181/vscode-faust) is a VS Code extension for Faust that works with faustlsp. Follow installation steps in the README.md
+
+## Neovim
+
+Sample nvim-lspconfig configuration which requires a .faustcfg.json in the faust project root directory:
+```lua
+vim.lsp.config('faustlsp', {
+    cmd = { 'faustlsp' },
+    filetypes = {'faust'},
+	workspace_required = true,
+	root_markers = { '.faustcfg.json' }
+})
+```
+
+## Emacs
+
+Sample lsp-mode server config
+```lisp
+(lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection "faustlsp")
+    :activation-fn (lsp-activate-on "faust")
+    :server-id 'faustlsp
+    ))
+```
+
+
 # Features
 
 - [x] Document Synchronization
 - [x] Diagnostics
   - [x] Syntax Errors
-  - [x] Compiler Errors (can disable as they look ugly due to compiler limitations)
+  - [x] Compiler Errors (can disable in .faustcfg.json as they look ugly due to compiler limitations)
 - [x] Hover Documentation
 - [x] Code Completion
 - [x] Document Symbols
@@ -47,6 +80,3 @@ Configuration Options:
 }
 ```
 
-# VS Code
-
-[vscode-faust](https://github.com/carn181/vscode-faust) is a VS Code extension for Faust that works with faustlsp.
