@@ -80,3 +80,10 @@ Configuration Options:
 }
 ```
 
+## 📜 License
+
+This project is released under the terms of the **GNU General Public License, Version 3 (GPLv3) or any later version**.
+
+**Copyright (C) 2025 Ryan Biju Varghese**
+
+You can find the full text of the license in the **`LICENSE`** file at the root of this repository.
