@@ -6,7 +6,7 @@ A LSP Server for the Faust programming language.
 
 To install, run  
 ```sh
-go get github.com/carn181/faustlsp@latest
+go get github.com/grame-cncm/faustlsp@latest
 ```
 
 This will install a `faustlsp` executable in `$HOME/go/bin` by default.  
@@ -15,7 +15,8 @@ This will install a `faustlsp` executable in `$HOME/go/bin` by default.
 Alternatively, you can clone this repository, build and install faustlsp.  
 
 ```sh
-git clone https://github.com/carn181/faustlsp
+git clone https://github.com/grame-cncm/faustlsp.git
+
 cd faustlsp
 go build
 go install
@@ -27,7 +28,7 @@ For code formatting, install [faustfmt](https://github.com/carn181/faustfmt) fol
 
 ## VS Code
 
-[vscode-faust](https://github.com/carn181/vscode-faust) is a VS Code extension for Faust that works with faustlsp. Follow installation steps in the README.md
+[vscode-faust](https://github.com/grame-cncm/vscode-faust/) is a VS Code extension for Faust that works with faustlsp. Follow installation steps in the README.md
 
 ## Neovim
 
@@ -63,9 +64,10 @@ Sample lsp-mode server config
 - [x] Hover Documentation
 - [x] Code Completion
 - [x] Document Symbols
-- [x] Formatting (using [faustfmt](https://github.com/carn181/faustfmt))
+- [x] Formatting (using [faustfmt](https://github.com/grame-cncm/faustfmt))
 - [x] Goto Definition
 - [ ] Find References
+
 
 # Configuration
 
