@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 	"unicode"
 
 	"github.com/carn181/faustlsp/logging"
@@ -109,11 +108,17 @@ func ParseDocumentation(node *tree_sitter.Node, content []byte) Documentation {
 	docContent := []string{}
 	curr := node
 
-	// Traverse previous siblings until we find a non-comment node
+	// Traverse previous siblings until we find a non-comment node. The
+	// `declare` statements a library puts between a definition and its
+	// comment are metadata, not a break in the documentation.
 	for {
 		curr = curr.PrevSibling()
 		if curr == nil {
 			break
+		}
+		switch curr.GrammarName() {
+		case "function_metadata", ";":
+			continue
 		}
 		if curr.GrammarName() != "comment" {
 			break
@@ -123,6 +128,17 @@ func ParseDocumentation(node *tree_sitter.Node, content []byte) Documentation {
 		lineContent = lineContent[len("//"):]
 		// Double spaces for markdown
 		docContent = slices.Insert(docContent, 0, lineContent)
+	}
+
+	// A library's doc block opens with a dashed line naming the function in
+	// backticks; whatever precedes that line is section banners or the
+	// previous block's tail.
+	for i := len(docContent) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(docContent[i])
+		if strings.HasPrefix(line, "---") && strings.Contains(line, "`") {
+			docContent = docContent[i:]
+			break
+		}
 	}
 
 	usage := ""
@@ -393,52 +409,42 @@ type Store struct {
 }
 
 // This needs workspace to be able to resolve the file path
-// Analyzes AST of a File and updates the store
+// Analyzes AST of a File and updates the store.
+//
+// One analysis runs at a time, and it parses the file and then every file
+// the parse found imported, one after another. The parse of a file holds
+// that file's lock, and library files import each other, so parsing them
+// concurrently can deadlock; the visited set and the scope cache are plain
+// maps, so concurrent parses also race on them.
 func (workspace *Workspace) AnalyzeFile(f *File, store *Store) {
-	// 3) After 1) and 2) are done, resolve all symbols as references
+	store.mu.Lock()
+	defer store.mu.Unlock()
 
 	var visited = make(map[util.Path]struct{})
 
-	// Stack for files to parse after current file
-	var fileChan = make(chan string)
-
-	// Parse through file import tree asynchronously to speed up parsing times using a pipeline
-	go func() {
-		for {
-			select {
-			case currentFile := <-fileChan:
-				logging.Logger.Info("Parsing file", "file", currentFile)
-				f, ok := store.Files.GetFromPath(currentFile)
-				//logging.Logger.Info("AST Traversal: Got library definition", "file", current, "ident", identName)
-				if ok {
-					go workspace.ParseFile(f, store, visited, fileChan)
-
-				} else {
-					store.Files.OpenFromPath(currentFile)
-					f, ok := store.Files.GetFromPath(currentFile)
-					if ok {
-						go workspace.ParseFile(f, store, visited, fileChan)
-					}
-
-				}
-			// Close file channel after 30 seconds
-			// TODO: Find way to close channel when all files are done parsing
-			case <-time.After(5 * time.Second):
-				logging.Logger.Info("Closing file channel as nothing received for 5 seconds")
-				close(fileChan)
-				return
-			}
-		}
-	}()
+	// Files to parse after the current one, in the order the parse found them
+	var queue []string
 
 	logging.Logger.Info("Starting to analyze file", "path", f.Handle.Path)
-	workspace.ParseFile(f, store, visited, fileChan)
+	workspace.ParseFile(f, store, visited, &queue)
+	for len(queue) > 0 {
+		currentFile := queue[0]
+		queue = queue[1:]
+		logging.Logger.Info("Parsing file", "file", currentFile)
+		imported, ok := store.Files.GetFromPath(currentFile)
+		if !ok {
+			store.Files.OpenFromPath(currentFile)
+			imported, ok = store.Files.GetFromPath(currentFile)
+		}
+		if ok {
+			workspace.ParseFile(imported, store, visited, &queue)
+		}
+	}
 
 	logging.Logger.Info("AST Parsing completed for file", "file", f.Handle.Path)
-	//	logging.Logger.Info("Dependency Graph", "graph", store.Dependencies.imports)
 }
 
-func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Path]struct{}, fileChan chan string) {
+func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Path]struct{}, queue *[]string) {
 	// If file is already visited, skip it
 	if _, ok := visited[f.Handle.Path]; !ok {
 		f.mu.Lock()
@@ -454,7 +460,7 @@ func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Pa
 			root := tree.RootNode()
 			scope := NewScope(nil, ToRange(root))
 			visited[f.Handle.Path] = struct{}{}
-			workspace.ParseASTNode(root, f, scope, store, visited, fileChan)
+			workspace.ParseASTNode(root, f, scope, store, visited, queue)
 			f.Scope = scope
 			store.Cache[f.Hash] = scope
 			f.mu.Unlock()
@@ -468,7 +474,7 @@ func (workspace *Workspace) ParseFile(f *File, store *Store, visited map[util.Pa
 
 }
 
-func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *File, scope *Scope, store *Store, visited map[util.Path]struct{}, fileChan chan string) {
+func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *File, scope *Scope, store *Store, visited map[util.Path]struct{}, queue *[]string) {
 	// Parse Symbols recursively. Map from tree_sitter.Node -> a Symbol type
 	if node == nil {
 		logging.Logger.Error("AST Parsing Traversal Error: Node is nil", "node", node)
@@ -504,7 +510,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			resolvedPath, _ := workspace.ResolveFilePath(libraryFilePath, workspace.Root)
 
 			logging.Logger.Info("AST Traversal: Got library definition", "file", resolvedPath, "ident", identName)
-			fileChan <- resolvedPath
+			*queue = append(*queue, resolvedPath)
 
 			logging.Logger.Info("AST Traversal: Got library definition", "file", resolvedPath, "ident", identName)
 			store.Dependencies.RemoveDependenciesForFile(currentFile.Handle.Path)
@@ -527,7 +533,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			for i := uint(0); i < value.ChildCount(); i++ {
 				// Parse each child of environment node
 				logging.Logger.Info("AST Traversal: Parsing environment child", "child", value.Child(i).GrammarName())
-				workspace.ParseASTNode(value.Child(i), currentFile, envScope, store, visited, fileChan)
+				workspace.ParseASTNode(value.Child(i), currentFile, envScope, store, visited, queue)
 			}
 			sym := NewEnvironment(
 				Location{
@@ -547,7 +553,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 			logging.Logger.Info("Current scope values", "scope", scope)
 			expr := NewScope(scope, ToRange(value))
 			for i := uint(0); i < node.ChildCount(); i++ {
-				workspace.ParseASTNode(node.Child(i), currentFile, expr, store, visited, fileChan)
+				workspace.ParseASTNode(node.Child(i), currentFile, expr, store, visited, queue)
 			}
 			sym := NewDefinition(
 				Location{
@@ -568,7 +574,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 		envScope := NewScope(scope, ToRange(node))
 
 		for i := uint(0); i < node.ChildCount(); i++ {
-			workspace.ParseASTNode(node.Child(i), currentFile, envScope, store, visited, fileChan)
+			workspace.ParseASTNode(node.Child(i), currentFile, envScope, store, visited, queue)
 		}
 		sym := NewEnvironment(
 			Location{
@@ -627,7 +633,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 		exprScope := NewScope(scope, ToRange(node))
 		logging.Logger.Info("Parsing function value using separate scope")
 		for i := uint(0); i < node.ChildCount(); i++ {
-			workspace.ParseASTNode(node.Child(i), currentFile, exprScope, store, visited, fileChan)
+			workspace.ParseASTNode(node.Child(i), currentFile, exprScope, store, visited, queue)
 		}
 
 		functionNode := NewFunction(
@@ -681,12 +687,12 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 		withScope := NewScope(scope, ToRange(node))
 		for i := uint(0); i < environment.NamedChildCount(); i++ {
 			logging.Logger.Info("AST Traversal: Parsing environment definition", "child", environment.NamedChild(i).GrammarName())
-			workspace.ParseASTNode(environment.NamedChild(i), currentFile, withScope, store, visited, fileChan)
+			workspace.ParseASTNode(environment.NamedChild(i), currentFile, withScope, store, visited, queue)
 		}
 
 		exprScope := NewScope(scope, ToRange(node))
 		logging.Logger.Info("AST Traversal: Parsing expr definition", "child", expr.GrammarName())
-		workspace.ParseASTNode(expr, currentFile, exprScope, store, visited, fileChan)
+		workspace.ParseASTNode(expr, currentFile, exprScope, store, visited, queue)
 
 		sym := NewWithEnvironment(Location{
 			File:  currentFile.Handle.Path,
@@ -711,11 +717,11 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 		letRecScope := NewScope(scope, ToRange(node))
 		for i := uint(0); i < environment.ChildCount(); i++ {
 			logging.Logger.Info("AST Traversal: Parsing child", "child", environment.Child(i).GrammarName())
-			workspace.ParseASTNode(environment.Child(i), currentFile, letRecScope, store, visited, fileChan)
+			workspace.ParseASTNode(environment.Child(i), currentFile, letRecScope, store, visited, queue)
 		}
 
 		exprScope := NewScope(scope, ToRange(node))
-		workspace.ParseASTNode(expr, currentFile, exprScope, store, visited, fileChan)
+		workspace.ParseASTNode(expr, currentFile, exprScope, store, visited, queue)
 
 		sym := NewLetRecEnvironment(Location{
 			File:  currentFile.Handle.Path,
@@ -737,7 +743,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 		resolvedPath, _ := workspace.ResolveFilePath(file, workspace.Root)
 		logging.Logger.Info("AST Traversal: Got import statement. Going through tree", "file", resolvedPath)
 
-		fileChan <- resolvedPath
+		*queue = append(*queue, resolvedPath)
 
 		store.Dependencies.RemoveDependenciesForFile(currentFile.Handle.Path)
 		store.Dependencies.AddDependency(currentFile.Handle.Path, resolvedPath)
@@ -860,7 +866,7 @@ func (workspace *Workspace) ParseASTNode(node *tree_sitter.Node, currentFile *Fi
 		logging.Logger.Info("Current scope values", "scope", scope)
 	default:
 		for i := uint(0); i < node.ChildCount(); i++ {
-			workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited, fileChan)
+			workspace.ParseASTNode(node.Child(i), currentFile, scope, store, visited, queue)
 		}
 	}
 }
@@ -1154,9 +1160,39 @@ func GetPossibleSymbols(pos transport.Position, filePath util.Path, store *Store
 	}
 	logging.Logger.Info("Found identifier at position", "ident", identifier, "scope_range", scope.Range, "len", len(scope.Symbols))
 
-	// 2) Split identifier by '.' to get symbol tree and find scope of last identifier
+	// 2) Split the identifier at its last '.': what precedes it names a
+	// library or environment whose members complete, and what follows it
+	// is the part of a member typed so far. Without a '.', the whole
+	// identifier is the part typed so far and the enclosing scopes complete.
+	partial := identifier
+	if i := strings.LastIndex(identifier, "."); i >= 0 {
+		partial = identifier[i+1:]
+		identifier = identifier[:i+1]
+	} else {
+		identifier = ""
+	}
+	return withPrefix(possibleSymbols(identifier, scope, store), partial)
+}
+
+// The symbols whose names begin with prefix.
+func withPrefix(syms []CompletionSym, prefix string) []CompletionSym {
+	if prefix == "" {
+		return syms
+	}
+	kept := []CompletionSym{}
+	for _, sym := range syms {
+		if strings.HasPrefix(sym.name, prefix) {
+			kept = append(kept, sym)
+		}
+	}
+	return kept
+}
+
+// The symbols that can complete after identifier, which is empty or ends
+// in '.', at scope.
+func possibleSymbols(identifier string, scope *Scope, store *Store) []CompletionSym {
 	if identifier == "" {
-		logging.Logger.Info("No identifier found at position, returning all symbols possible in current scope", "pos", pos, "offset", offset)
+		logging.Logger.Info("No identifier found at position, returning all symbols possible in current scope")
 
 		availableSymbols := []CompletionSym{}
 		for {
@@ -1353,52 +1389,27 @@ func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope)
 }
 
 func FindSymbolScopeAtOffset(content []byte, scope *Scope, offset uint, encoding string) (string, *Scope) {
-	// Manual version of FindSymbolScope that doesn't use tree-sitter to find the identifier at the given offset
-	i, j := offset, offset
-
-	// Move start till reaches non valid character
-	for {
-		if j == uint(len(content)-1) {
-			break
-		}
-		if unicode.IsLetter(rune(content[j])) || unicode.IsDigit(rune(content[j])) || content[j] == '.' {
-			j++
-		} else {
-			break
-		}
+	// The identifier being completed is the run of name characters and dots
+	// that ends at the cursor; what follows the cursor is not part of it.
+	// The cursor can sit at the end of the content, one past the last byte.
+	n := uint(len(content))
+	if offset > n {
+		offset = n
 	}
-
-	// Move end till reaches non valid character
-	for {
-		if i == 0 {
-			break
-		}
-		if unicode.IsLetter(rune(content[i])) || unicode.IsDigit(rune(content[i])) || content[i] == '.' {
-			i--
-		} else {
-			break
-		}
+	isIdent := func(b byte) bool {
+		return unicode.IsLetter(rune(b)) || unicode.IsDigit(rune(b)) || b == '.' || b == '_'
 	}
-	ident := content[i:j]
-	if string(ident) == "" {
-		// Trying to go back from offset to find identifier
+	i := offset
+	for i > 0 && isIdent(content[i-1]) {
 		i--
-		for {
-			if i <= 0 {
-				break
-			}
-			if unicode.IsLetter(rune(content[i])) || unicode.IsDigit(rune(content[i])) || content[i] == '.' {
-				i--
-			} else {
-				break
-			}
-		}
-		ident = content[i+1 : j]
 	}
+	ident := content[i:offset]
 
-	//logging.Logger.Info("Found identifier at offset", "ident", string(ident), "start", i+1, "end", j, "offset", offset)
 	start, err := OffsetToPosition(i, string(content), encoding)
-	end, err := OffsetToPosition(j, string(content), encoding)
+	if err != nil {
+		return "", nil
+	}
+	end, err := OffsetToPosition(offset, string(content), encoding)
 	if err != nil {
 		return "", nil
 	}

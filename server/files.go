@@ -186,7 +186,6 @@ func (files *Files) ModifyFull(path util.Path, content string) {
 	f, ok := files.GetFromPath(path)
 	if !ok {
 		logging.Logger.Error("file to modify not in file store", "path", path)
-		files.mu.Unlock()
 		return
 	}
 
@@ -205,7 +204,6 @@ func (files *Files) ModifyIncremental(path util.Path, changeRange transport.Rang
 	f, ok := files.GetFromPath(path)
 	if !ok {
 		logging.Logger.Error("file to modify not in file store", "path", path)
-		files.mu.Unlock()
 		return
 	}
 	result := ApplyIncrementalChange(changeRange, content, string(f.Content), string(files.encoding))

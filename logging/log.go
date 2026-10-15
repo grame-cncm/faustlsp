@@ -29,8 +29,20 @@ func Init() {
 
 	// Initialize the logger to write to the file, without flags or prefixes.
 	//	Logger = log.New(f, "faust-lsp: ", log.Ltime)
+	// The server logs every node it parses at INFO, which costs more time
+	// than the parse itself, so INFO is opt-in: FAUSTLSP_LOG=info or
+	// FAUSTLSP_LOG=debug turns it on; the default records warnings and
+	// errors only.
+	level := slog.LevelWarn
+	switch os.Getenv("FAUSTLSP_LOG") {
+	case "info":
+		level = slog.LevelInfo
+	case "debug":
+		level = slog.LevelDebug
+	}
 	Logger = slog.New(slog.NewJSONHandler(f, &slog.HandlerOptions{
-		AddSource: true,
+		AddSource: level <= slog.LevelInfo,
+		Level:     level,
 	}))
 
 }

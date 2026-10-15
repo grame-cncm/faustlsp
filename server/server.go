@@ -144,9 +144,11 @@ func (s *Server) Loop(ctx context.Context, end chan<- error) {
 
 		// Dispatch to Method Handler
 
-		// Handle important lifecycle messages non-concurrently
+		// Lifecycle messages and document edits are handled in order, on this
+		// goroutine, so every later message sees the edits before it.
 		switch method {
-		case "exit", "shutdown", "initialize", "initialized":
+		case "exit", "shutdown", "initialize", "initialized",
+			"textDocument/didOpen", "textDocument/didChange", "textDocument/didClose", "textDocument/didSave":
 			s.HandleMethod(ctx, method, msg)
 		default:
 			go s.HandleMethod(ctx, method, msg)

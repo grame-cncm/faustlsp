@@ -70,7 +70,6 @@ func FindCompletionReplaceRange(pos transport.Position, content, encoding string
 	}
 	start, end := offset, offset
 	for {
-		logging.Logger.Info("Finding start", "start", start, "char", string(content[start]))
 		if start <= 0 {
 			break
 		}

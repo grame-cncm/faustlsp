@@ -24,13 +24,12 @@ func Initialize(ctx context.Context, s *Server, par json.RawMessage) (json.RawMe
 	// Server Capabilities
 
 	// Don't select UTF-8, select UTF-32 and UTF-16 only
-	var positionEncoding transport.PositionEncodingKind
-	if params.Capabilities.General.PositionEncodings[0] == "utf-16" {
-		positionEncoding = transport.UTF16
-	} else if params.Capabilities.General.PositionEncodings[0] == "utf-32" {
+	// A client that names no encodings gets UTF-16, the protocol's default.
+	positionEncoding := transport.UTF16
+	if general := params.Capabilities.General; general != nil &&
+		len(general.PositionEncodings) > 0 &&
+		general.PositionEncodings[0] == "utf-32" {
 		positionEncoding = transport.UTF32
-	} else {
-		positionEncoding = transport.UTF16
 	}
 	var result transport.InitializeResult = transport.InitializeResult{
 		Capabilities: transport.ServerCapabilities{

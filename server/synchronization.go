@@ -39,6 +39,9 @@ func TextDocumentOpen(ctx context.Context, s *Server, par json.RawMessage) error
 		f, _ = s.Files.GetFromURI(util.URI(fileURI))
 	}
 
+	// The editor's buffer is authoritative; it can differ from the file on disk.
+	s.Files.ModifyFull(f.Handle.Path, params.TextDocument.Text)
+
 	f.mu.RLock()
 	logging.Logger.Info("Current File", "content", f.Content)
 
